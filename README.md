@@ -2,9 +2,13 @@
 
 A 3D voxel world that runs itself. Little people forage, build, farm, research, raise families and found new towns. Over time they work their way from campfires in the Stone Age to skyscrapers, rockets and starships. You don't have to do anything. Just watch.
 
-## Run it
+## Watch it
 
-Open `index.html` in a browser (Chrome, Edge, Firefox or Safari). That's it. No install and no build step. Three.js loads from a CDN, so you need an internet connection.
+**Live: https://olliemackman-web.github.io/simulation/** works on desktop and phones. On a phone, use your browser's *Add to Home Screen* option to get it full-screen.
+
+On a phone: drag with one finger to look around, pinch to zoom, drag with two fingers to pan, and tap a person to follow them. The 📊 button opens the towns and stats panel.
+
+To run it locally instead, open `index.html` in a browser (Chrome, Edge, Firefox or Safari). That's it. No install and no build step. Three.js loads from a CDN, so you need an internet connection.
 
 If your browser blocks local files, serve the folder instead:
 
