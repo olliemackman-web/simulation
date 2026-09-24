@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel World</title>
+<meta name="description" content="A self-running voxel world where little people learn, build and evolve from the Stone Age to the stars.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --panel: rgba(14, 18, 28, 0.72);
+    --panel-solid: #0e121c;
+    --line: rgba(255, 255, 255, 0.1);
+    --text: #eef2f7;
+    --muted: #9aa6b8;
+    --accent: #ffd35a;
+    --good: #6fdc8c;
+    --bad: #ff7a6a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1230; color: var(--text); font: 13px/1.4 Inter, system-ui, sans-serif; }
+  canvas#view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: grab; touch-action: none; }
+  canvas#view:active { cursor: grabbing; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
+  .pixel { font-family: Silkscreen, monospace; letter-spacing: 0.5px; }
+  #top { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; gap: 10px; align-items: center; pointer-events: none; }
+  #top > * { pointer-events: auto; }
+  #title { padding: 8px 14px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #title h1 { font: 700 16px Silkscreen, monospace; margin: 0; color: var(--accent); text-shadow: 2px 2px 0 #000; }
+  .stat { color: var(--muted); white-space: nowrap; }
+  .stat b { color: var(--text); font-weight: 600; }
+  #controls { margin-left: auto; padding: 6px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  button { font: 600 12px Inter, sans-serif; color: var(--text); background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+  button:hover { background: rgba(255,255,255,0.14); }
+  button.on { background: var(--accent); color: #1a1a1a; border-color: var(--accent); }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+
+  #left { position: fixed; top: 70px; left: 12px; width: 270px; max-height: calc(100vh - 330px); overflow-y: auto; padding: 10px; }
+  #left h2, #right h2 { font: 700 11px Silkscreen, monospace; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; }
+  .town { padding: 8px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; margin-bottom: 4px; }
+  .town:hover { background: rgba(255,255,255,0.06); border-color: var(--line); }
+  .town.dead { opacity: 0.45; }
+  .town .row { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
+  .town .name { font-weight: 600; }
+  .town .era { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .town .meta { font-size: 11px; color: var(--muted); margin: 3px 0 4px 18px; }
+  .bar { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-left: 18px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .res { font-size: 11px; color: var(--muted); margin: 3px 0 0 18px; font-variant-numeric: tabular-nums; }
+
+  #right { position: fixed; top: 70px; right: 12px; width: 260px; display: flex; flex-direction: column; gap: 10px; }
+  #right .panel { padding: 10px; }
+  #chart { width: 100%; height: 90px; display: block; }
+  .legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
+  .legend span::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; background: var(--c); }
+  .traits { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; font-size: 11px; color: var(--muted); align-items: center; margin-top: 8px; }
+  .traits .bar { margin: 0; }
+  .traits b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  #person { display: none; }
+  #person .pname { font-weight: 600; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  #person .thought { color: var(--accent); font-style: italic; margin: 6px 0; }
+  #person .small { color: var(--muted); font-size: 11px; }
+
+  #chronicle { position: fixed; left: 12px; bottom: 12px; width: min(470px, calc(100vw - 24px)); padding: 10px 12px; max-height: 220px; overflow: hidden; }
+  #chronicle ul { list-style: none; margin: 0; padding: 0; }
+  #chronicle li { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; gap: 8px; animation: fadein 0.6s; }
+  #chronicle li .y { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 52px; font-size: 11px; padding-top: 1px; }
+  #chronicle li.big { color: var(--accent); }
+  #chronicle li.disaster { color: var(--bad); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+
+  #toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); padding: 12px 20px; font: 700 15px Silkscreen, monospace; text-align: center; color: var(--accent); opacity: 0; transition: opacity 0.6s; pointer-events: none; max-width: min(640px, 90vw); text-shadow: 2px 2px 0 #000; }
+  #toast.show { opacity: 1; }
+  #caption { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.85); font-size: 12px; text-shadow: 0 1px 3px #000; pointer-events: none; white-space: nowrap; }
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .label { position: absolute; transform: translate(-50%, -100%); font: 700 11px Silkscreen, monospace; color: #fff; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; white-space: nowrap; display: flex; gap: 5px; align-items: center; }
+  .label small { font: 500 10px Inter, sans-serif; color: #dfe6ee; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0b1230; z-index: 10; font: 700 18px Silkscreen, monospace; color: var(--accent); transition: opacity 0.8s; }
+  #loading.gone { opacity: 0; pointer-events: none; }
+  #help { position: fixed; bottom: 12px; right: 12px; font-size: 11px; color: var(--muted); padding: 6px 10px; }
+
+  @media (max-width: 900px) {
+    #right { display: none; }
+    #left { width: 220px; }
+  }
+  @media (max-width: 640px) {
+    #left { display: none; }
+    #help { display: none; }
+    #title .stat.opt { display: none; }
+    #chronicle { max-height: 120px; }
+    #caption { bottom: 140px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="labels"></div>
+<div id="top">
+  <div id="title" class="panel">
+    <h1>Pixel World</h1>
+    <span class="stat">Year <b id="s-year">1</b></span>
+    <span class="stat"><b id="s-era">Stone Age</b></span>
+    <span class="stat">Population <b id="s-pop">0</b></span>
+    <span class="stat opt">Towns <b id="s-towns">0</b></span>
+    <span class="stat opt" id="s-time">☀</span>
+  </div>
+  <div id="controls" class="panel">
+    <button data-speed="0" title="Pause (Space)">❚❚</button>
+    <button data-speed="1" title="Speed 1× (1)">1×</button>
+    <button data-speed="2" title="Speed 2× (2)">2×</button>
+    <button data-speed="5" title="Speed 5× (3)">5×</button>
+    <button data-speed="15" title="Speed 15× (4)">15×</button>
+    <button data-speed="40" title="Speed 40× (5)">40×</button>
+    <span class="sep"></span>
+    <button id="b-cam" class="on" title="Cinematic camera (C)">Auto camera</button>
+    <button id="b-new" title="Start a brand-new world">New world</button>
+  </div>
+</div>
+<div id="left" class="panel"><h2>Civilisations</h2><div id="towns"></div></div>
+<div id="right">
+  <div id="person" class="panel"></div>
+  <div class="panel">
+    <h2>Evolution</h2>
+    <canvas id="chart" width="480" height="180"></canvas>
+    <div class="legend"><span style="--c:#6fdc8c">Population</span><span style="--c:#ffd35a">Technologies</span><span style="--c:#7ab8ff">Intelligence</span></div>
+    <div class="traits" id="traits"></div>
+  </div>
+</div>
+<div id="chronicle" class="panel"><ul id="log"></ul></div>
+<div id="toast" class="panel"></div>
+<div id="caption"></div>
+<div id="help" class="panel">Drag to look · Right-drag to pan · Scroll to zoom · Click a person to follow</div>
+<div id="loading">Generating world…</div>
+
+<script src="js/util.js"></script>
+<script src="js/tech.js"></script>
+<script src="js/world.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/models.js"></script>
+<script src="js/render.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+<script type="module">
+  import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+  window.THREE = THREE;
+  window.startPixelWorld();
+</script>
+</body>
+</html>
