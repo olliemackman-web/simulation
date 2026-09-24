@@ -33,6 +33,7 @@
         app.rig.follow = null; app.rig.manual();
         if (app.mobile) this.sheet(null);
       });
+      $('s-save').addEventListener('click', () => { const t = $('s-save').title; if (t) alert(t); });
       $('b-new').addEventListener('click', () => { if (confirm('Start a brand-new world? The current one will be lost.')) app.newWorld(); });
       $('towns').addEventListener('click', (e) => {
         const el = e.target.closest('.town');
@@ -96,10 +97,27 @@
       $('s-time').textContent = SIM.isNight(S) ? '☾ Night' : tod < 0.3 ? '☀ Morning' : tod < 0.65 ? '☀ Day' : '☀ Evening';
       const temp = S.climate.temp;
       $('s-climate').textContent = temp < -0.5 ? '❄ Ice age' : temp < -0.2 ? '❄ Cooling' : temp > 0.35 ? '🌿 Warm age' : '';
+      this.saveBadge();
       $('s-war').textContent = S.wars.length ? `⚔ ${S.wars.length} war${S.wars.length > 1 ? 's' : ''}` : '';
       document.querySelectorAll('[data-speed]').forEach((b) => b.classList.toggle('on', +b.dataset.speed === this.app.speed));
       $('b-cam').classList.toggle('on', this.app.rig.auto);
       this.chart(S);
+    }
+
+    saveBadge() {
+      const st = this.app.saveStatus, el = $('s-save');
+      if (!st || st.ok == null) { el.textContent = ''; return; }
+      if (st.ok) {
+        el.innerHTML = Date.now() - st.t < 3000 ? '💾 Saved' : '💾';
+        el.title = 'Your world is saved in this browser automatically every 10 seconds.';
+        el.style.color = '';
+      } else {
+        el.innerHTML = '⚠ Not saving';
+        el.style.color = 'var(--bad)';
+        el.title = st.err === 'full'
+          ? 'This browser has no storage space left for the site, so the world cannot be saved. Refreshing will start a new world.'
+          : 'This browser is blocking storage for the site (private browsing, or website data blocked in settings), so the world cannot be saved. Refreshing will start a new world.';
+      }
     }
 
     towns(S) {

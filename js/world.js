@@ -107,14 +107,41 @@
     return -1;
   }
 
+  // Run-length encoding keeps saves small: most tiles are zeros / -1.
+  function rle(arr, k) {
+    const out = [];
+    const round = k === 'traffic' || k === 'amt' || k === 'grow' || k === 'fire';
+    for (let i = 0; i < arr.length;) {
+      const v = round ? Math.round(arr[i] * 100) / 100 : arr[i];
+      let n = 1;
+      while (i + n < arr.length && (round ? Math.round(arr[i + n] * 100) / 100 : arr[i + n]) === v) n++;
+      out.push(n > 2 ? `${v}*${n}` : n === 2 ? `${v},${v}` : `${v}`);
+      i += n;
+    }
+    return out.join(',');
+  }
+  function unrle(str, T) {
+    const a = new T(N * N);
+    let i = 0;
+    for (const tok of str.split(',')) {
+      const star = tok.indexOf('*');
+      if (star < 0) a[i++] = +tok;
+      else { const v = +tok.slice(0, star), n = +tok.slice(star + 1); a.fill(v, i, i + n); i += n; }
+    }
+    return a;
+  }
+
   function toJSON(w) {
-    const o = { N: w.N, seed: w.seed, sea: w.sea };
-    for (const k in ARRAYS) o[k] = Array.from(w[k], (v) => (k === 'traffic' || k === 'amt' || k === 'grow' || k === 'fire' ? Math.round(v * 100) / 100 : v));
+    const o = { N: w.N, seed: w.seed, sea: w.sea, enc: 'rle' };
+    for (const k in ARRAYS) o[k] = rle(w[k], k);
     return o;
   }
   function fromJSON(o) {
     const w = { N: o.N, seed: o.seed, sea: o.sea };
-    for (const k in ARRAYS) w[k] = ARRAYS[k].from(o[k] || new Array(N * N).fill(k === 'occ' ? -1 : 0));
+    for (const k in ARRAYS) {
+      if (o.enc === 'rle' && typeof o[k] === 'string') w[k] = unrle(o[k], ARRAYS[k]);
+      else w[k] = ARRAYS[k].from(o[k] || new Array(N * N).fill(k === 'occ' ? -1 : 0)); // older saves
+    }
     return w;
   }
 

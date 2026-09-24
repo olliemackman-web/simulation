@@ -1,21 +1,98 @@
 // Boot, main loop, speed control, autosave.
 (function (G) {
   const SIM = G.SIM;
-  const SAVE_KEY = 'pixelworld-save-v1';
   const STEP = 0.1;
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (raw) return SIM.deserialize(raw);
-    } catch (e) { console.warn('Could not restore saved world', e); }
-    return null;
-  }
-  function save(S) {
-    try { localStorage.setItem(SAVE_KEY, SIM.serialize(S)); } catch (e) { /* storage full or blocked: keep running */ }
+  // ---------- Saving ----------
+  // Every save goes to two places: alternating localStorage slots (synchronous, survives a sudden
+  // refresh) and IndexedDB (bigger quota). On load, the newest copy that parses wins, so one
+  // bad or half-written copy can never wipe the world.
+  const LS_KEYS = ['pixelworld-save-v1', 'pixelworld-save-v1b'];
+  const status = { ok: null, t: 0, err: '' };
+
+  const idb = {
+    db: null,
+    open() {
+      return new Promise((res) => {
+        try {
+          const r = indexedDB.open('pixelworld', 1);
+          r.onupgradeneeded = () => r.result.createObjectStore('saves');
+          r.onsuccess = () => { idb.db = r.result; res(true); };
+          r.onerror = r.onblocked = () => res(false);
+        } catch (e) { res(false); }
+      });
+    },
+    get(key) {
+      return new Promise((res) => {
+        if (!idb.db) return res(null);
+        try { const q = idb.db.transaction('saves').objectStore('saves').get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); } catch (e) { res(null); }
+      });
+    },
+    put(key, rec) {
+      return new Promise((res) => {
+        if (!idb.db) return res(false);
+        try { const tx = idb.db.transaction('saves', 'readwrite'); tx.objectStore('saves').put(rec, key); tx.oncomplete = () => res(true); tx.onerror = tx.onabort = () => res(false); } catch (e) { res(false); }
+      });
+    },
+  };
+
+  const pack = (rec) => `${rec.t}|${rec.year}|${rec.data}`;
+  function unpack(str) {
+    if (!str) return null;
+    const a = str.indexOf('|'), b = str.indexOf('|', a + 1);
+    if (a > 0 && b > a && /^\d+$/.test(str.slice(0, a))) return { t: +str.slice(0, a), year: +str.slice(a + 1, b), data: str.slice(b + 1) };
+    return { t: 0, year: 0, data: str }; // saves from before this format
   }
 
-  G.startPixelWorld = function () {
+  function writeLocal(rec) {
+    const str = pack(rec);
+    let slot = 0;
+    try { slot = localStorage.getItem('pixelworld-save-slot') === '0' ? 1 : 0; } catch (e) { return 'blocked'; }
+    try {
+      localStorage.setItem(LS_KEYS[slot], str);
+      localStorage.setItem('pixelworld-save-slot', String(slot));
+      return 'ok';
+    } catch (e) {
+      // Out of room: drop the older copy and try once more.
+      try {
+        localStorage.removeItem(LS_KEYS[slot]);
+        localStorage.setItem(LS_KEYS[slot], str);
+        localStorage.setItem('pixelworld-save-slot', String(slot));
+        return 'ok';
+      } catch (e2) { return e2 && e2.name === 'QuotaExceededError' ? 'full' : 'blocked'; }
+    }
+  }
+
+  function save(S) {
+    if (!S) return;
+    let rec;
+    try { rec = { t: Date.now(), year: SIM.yearOf(S), data: SIM.serialize(S) }; } catch (e) { status.ok = false; status.err = 'error'; return; }
+    const local = writeLocal(rec);
+    if (local === 'ok') { status.ok = true; status.t = Date.now(); status.err = ''; }
+    idb.put('main', rec).then((ok) => {
+      if (ok) { status.ok = true; status.t = Date.now(); status.err = ''; }
+      else if (local !== 'ok') { status.ok = false; status.err = local; }
+    });
+  }
+
+  async function load() {
+    const cands = [];
+    for (const k of LS_KEYS) { try { const r = unpack(localStorage.getItem(k)); if (r) cands.push(r); } catch (e) { /* blocked */ } }
+    const r = await idb.get('main');
+    if (r && r.data) cands.push(r);
+    cands.sort((a, b) => b.t - a.t);
+    for (const c of cands) {
+      try { return { S: SIM.deserialize(c.data) }; } catch (e) { console.warn('Skipping unreadable save', e); }
+    }
+    if (cands.length) {
+      // Keep the unreadable save around rather than overwriting it.
+      await idb.put('broken-' + Date.now(), cands[0]);
+      return { S: null, broken: true };
+    }
+    return { S: null };
+  }
+
+  G.startPixelWorld = async function () {
     const canvas = document.getElementById('view');
     const mobile = matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 700 || window.innerWidth < 640;
     document.body.classList.toggle('mobile', mobile);
@@ -36,8 +113,15 @@
       save(app.S);
     };
 
-    app.S = load() || SIM.create();
+    await idb.open();
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* optional */ }
+    const loaded = await load();
+    app.S = loaded.S || SIM.create();
+    app.save = () => save(app.S);
+    app.saveStatus = status;
     app.R.setState(app.S);
+    if (loaded.broken) setTimeout(() => app.ui.toast('Your saved world could not be loaded, so a new one has begun.'), 1500);
+    save(app.S);
     app.S.fx.events.length = 0;
     app.ui.reset(app.S);
 
@@ -97,7 +181,7 @@
       app.ui.frame(S, dt);
 
       saveT += dt;
-      if (saveT > 30) { saveT = 0; save(S); }
+      if (saveT > 10) { saveT = 0; save(S); }
       requestAnimationFrame(frame);
     }
     window.addEventListener('beforeunload', () => save(app.S));
