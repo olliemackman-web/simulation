@@ -9,18 +9,36 @@
   class UI {
     constructor(app) {
       this.app = app;
-      this.acc = 0;
+      this.acc = 1; // fill the HUD on the first frame
       this.labels = new Map();
       this.toastT = 0;
       this.logCount = 0;
       document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => app.setSpeed(+b.dataset.speed)));
       $('b-cam').addEventListener('click', () => app.rig.setAuto(!app.rig.auto));
+      // Mobile pull-up sheet.
+      const body = document.body;
+      this.sheet = (tab) => {
+        body.classList.remove('sheet', 'sheet-towns', 'sheet-stats');
+        if (tab) body.classList.add('sheet', 'sheet-' + tab);
+        document.querySelectorAll('#sheetbar [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+      };
+      $('b-info').addEventListener('click', () => this.sheet(body.classList.contains('sheet') ? null : 'towns'));
+      $('sheetbar').addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (b) this.sheet(b.dataset.tab || null);
+      });
+      $('caption').addEventListener('click', () => { if (app.mobile) this.sheet('stats'); });
+      $('person').addEventListener('click', (e) => {
+        if (e.target.id !== 'b-unfollow') return;
+        app.rig.follow = null; app.rig.manual();
+        if (app.mobile) this.sheet(null);
+      });
       $('b-new').addEventListener('click', () => { if (confirm('Start a brand-new world? The current one will be lost.')) app.newWorld(); });
       $('towns').addEventListener('click', (e) => {
         const el = e.target.closest('.town');
         if (!el) return;
         const s = app.S.cache.s.get(+el.dataset.id);
-        if (s) { app.rig.manual(); app.rig.focus(s.cx - 64, s.cz - 64, 30, 0.65); }
+        if (s) { app.rig.manual(); app.rig.focus(s.cx - 64, s.cz - 64, 30, 0.65); if (app.mobile) this.sheet(null); }
       });
     }
 
@@ -107,7 +125,7 @@
       const tbar = (name, v) => `<span>${name}</span><div class="bar"><i style="width:${Math.min(100, (v / 2) * 100)}%;background:#7ab8ff"></i></div><b>${v.toFixed(2)}</b>`;
       const sbar = (name, v) => `<span>${name}</span><div class="bar"><i style="width:${v * 100}%;background:#6fdc8c"></i></div><b>${Math.round(v * 100)}</b>`;
       el.style.display = 'block';
-      el.innerHTML = `<h2>Following</h2>
+      const html = `<h2>Following</h2>
         <div class="pname"><span class="dot" style="background:${hex(s ? s.color : 0x888888)}"></span>${esc(p.name)}</div>
         <div class="small">${p.sex === 'F' ? 'She' : 'He'} is ${Math.floor(p.age)} · ${stage} of ${esc(s ? s.name : '?')} · generation ${p.gen}</div>
         <div class="thought">“${esc(p.thought)}”</div>
@@ -115,7 +133,8 @@
         <div class="traits">${tbar('Strength', p.traits.str)}${tbar('Intellect', p.traits.int)}${tbar('Constitution', p.traits.con)}${tbar('Curiosity', p.traits.cur)}
         ${sbar('Gathering', p.skills.gather)}${sbar('Building', p.skills.build)}${sbar('Research', p.skills.research)}</div>
         <div style="margin-top:8px"><button id="b-unfollow">Stop following</button></div>`;
-      $('b-unfollow').onclick = () => { this.app.rig.follow = null; this.app.rig.manual(); };
+      // Only touch the DOM when something changed, so taps on the button aren't lost mid-rebuild.
+      if (html !== this._personHtml) { el.innerHTML = html; this._personHtml = html; }
     }
 
     caption(S) {
@@ -123,7 +142,7 @@
       let text = '';
       if (rig.follow != null) {
         const p = S.cache.p.get(rig.follow);
-        if (p) text = `${p.name} — ${p.thought}`;
+        if (p) text = `${p.name} — ${p.thought}${this.app.mobile ? '  ›' : ''}`;
       } else if (rig.shotKind === 'town' && rig.auto && rig.lastTown) text = `${rig.lastTown.name} · ${TD.ERAS[rig.lastTown.era]} · ${rig.lastTown.pop} people`;
       $('caption').textContent = text;
     }

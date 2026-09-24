@@ -75,15 +75,17 @@
   const CARRY = { wood: 0x8b5a2b, stone: 0x9a9a9a, food: 0xd04040, metal: 0xc0c8d8, goods: 0xe0b040 };
 
   class Renderer {
-    constructor(canvas) {
+    constructor(canvas, opts = {}) {
+      this.mobile = !!opts.mobile;
+      this.pcap = this.mobile ? 500 : 1600;
       _m = new THREE.Matrix4(); _q = new THREE.Quaternion(); _p = new THREE.Vector3(); _s = new THREE.Vector3();
       _c = new THREE.Color(); _v = new THREE.Vector3(); UP = new THREE.Vector3(0, 1, 0); ZAX = new THREE.Vector3(0, 0, 1);
       ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
       const r = (this.gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }));
-      r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      r.setPixelRatio(Math.min(window.devicePixelRatio, this.mobile ? 1.5 : 2));
       r.shadowMap.enabled = true;
-      r.shadowMap.type = THREE.PCFSoftShadowMap;
+      r.shadowMap.type = this.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
       const scene = (this.scene = new THREE.Scene());
       scene.fog = new THREE.Fog(0x87c5ee, 160, 420);
       this.camera = new THREE.PerspectiveCamera(42, 1, 0.3, 900);
@@ -92,7 +94,7 @@
       scene.add(this.hemi);
       this.sun = new THREE.DirectionalLight(0xfff2d8, 2.6);
       this.sun.castShadow = true;
-      this.sun.shadow.mapSize.set(2048, 2048);
+      this.sun.shadow.mapSize.setScalar(this.mobile ? 1024 : 2048);
       const sc = this.sun.shadow.camera;
       sc.left = -80; sc.right = 80; sc.top = 80; sc.bottom = -80; sc.near = 1; sc.far = 420;
       this.sun.shadow.bias = -0.0008;
@@ -129,7 +131,7 @@
       scene.add(this.stars);
 
       this.clouds = [];
-      for (let k = 0; k < 16; k++) {
+      for (let k = 0; k < (this.mobile ? 9 : 16); k++) {
         const parts = [];
         const n = U.randi(3, 6);
         for (let j = 0; j < n; j++) parts.push([U.rand(-4, 4), U.rand(0, 1), U.rand(-2.5, 2.5), U.rand(3, 7), U.rand(0.8, 1.6), U.rand(2.5, 5)]);
@@ -456,7 +458,7 @@
             e.acc += dt * e.rate * 1.2;
             while (e.acc > 1) {
               e.acc -= 1;
-              if (this.particles.length < 1600) this.particles.push({ x: e.x + U.rand(-0.05, 0.05), y: e.y, z: e.z + U.rand(-0.05, 0.05), vy: U.rand(0.5, 0.8), age: 0, life: U.rand(3, 5), s: U.rand(0.12, 0.2), dark: e.dark });
+              if (this.particles.length < this.pcap) this.particles.push({ x: e.x + U.rand(-0.05, 0.05), y: e.y, z: e.z + U.rand(-0.05, 0.05), vy: U.rand(0.5, 0.8), age: 0, life: U.rand(3, 5), s: U.rand(0.12, 0.2), dark: e.dark });
             }
           } else if (e.k === 'fire') {
             for (let k = 0; k < 3; k++) {
@@ -525,7 +527,7 @@
         this.dynGlow.push(l.x, l.y + h - 0.3 * k * fl, l.z, 0.3 * k, 0.6 * k * fl, 0.3 * k, flame);
         this.dynGlow.push(l.x, l.y + h - 0.7 * k * fl, l.z, 0.18 * k, 0.5 * k * fl, 0.18 * k, 0xfff0a0);
         const n = l.t < 6 ? 5 : 1;
-        for (let j = 0; j < n && this.particles.length < 1800; j++) {
+        for (let j = 0; j < n && this.particles.length < this.pcap + 200; j++) {
           this.particles.push({ x: l.x + U.rand(-0.4, 0.4), y: l.y + h, z: l.z + U.rand(-0.4, 0.4), vy: U.rand(-0.2, 0.3), vx: U.rand(-0.8, 0.8), vz: U.rand(-0.8, 0.8), age: 0, life: U.rand(2, 5), s: U.rand(0.3, 0.6), dark: false });
         }
       }
@@ -540,7 +542,7 @@
           const fl = 0.6 + Math.sin(t * 11 + k * 2 + i) * 0.4;
           this.dynGlow.push(X + (k - 1) * 0.2, Y + 0.3 + fl * 0.3, Z + Math.sin(k + i) * 0.2, 0.22, 0.6 * fl + 0.2, 0.22, k === 1 ? 0xffd040 : 0xff6010);
         }
-        if (Math.random() < 0.15 && this.particles.length < 1600) this.particles.push({ x: X, y: Y + 1, z: Z, vy: 1.2, age: 0, life: 4, s: 0.3, dark: true });
+        if (Math.random() < 0.15 && this.particles.length < this.pcap) this.particles.push({ x: X, y: Y + 1, z: Z, vy: 1.2, age: 0, life: 4, s: 0.3, dark: true });
       }
     }
 
@@ -584,6 +586,19 @@
       const hits = ray.intersectObject(this.dyn.mesh);
       for (const h of hits) { const id = this.pick[h.instanceId]; if (id != null) return id; }
       return null;
+    }
+
+    // Nearest visible person to a screen point (in pixels), for taps that miss the tiny voxels.
+    nearestPerson(px, py, w, h, maxPx) {
+      let best = null, bd = maxPx;
+      for (const p of this.S.people) {
+        if (p.mode === 'hidden') continue;
+        _v.set(p.x - OFF, this.groundY(p.x, p.z) + 0.25, p.z - OFF).project(this.camera);
+        if (_v.z > 1) continue;
+        const d = Math.hypot(((_v.x + 1) / 2) * w - px, ((1 - _v.y) / 2) * h - py);
+        if (d < bd) { bd = d; best = p.id; }
+      }
+      return best;
     }
 
     project(x, y, z) {

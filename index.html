@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0e121c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pixel World">
 <title>Pixel World</title>
 <meta name="description" content="A self-running voxel world where little people learn, build and evolve from the Stone Age to the stars.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,7 +26,7 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1230; color: var(--text); font: 13px/1.4 Inter, system-ui, sans-serif; }
-  canvas#view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: grab; touch-action: none; }
+  canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   canvas#view:active { cursor: grabbing; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
   .pixel { font-family: Silkscreen, monospace; letter-spacing: 0.5px; }
@@ -32,7 +37,7 @@
   .stat { color: var(--muted); white-space: nowrap; }
   .stat b { color: var(--text); font-weight: 600; }
   #controls { margin-left: auto; padding: 6px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-  button { font: 600 12px Inter, sans-serif; color: var(--text); background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+  button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; font: 600 12px Inter, sans-serif; color: var(--text); background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
   button:hover { background: rgba(255,255,255,0.14); }
   button.on { background: var(--accent); color: #1a1a1a; border-color: var(--accent); }
   .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
@@ -83,17 +88,44 @@
   #loading.gone { opacity: 0; pointer-events: none; }
   #help { position: fixed; bottom: 12px; right: 12px; font-size: 11px; color: var(--muted); padding: 6px 10px; }
 
+  .sm, #b-info, #sheetbar { display: none; }
   @media (max-width: 900px) {
     #right { display: none; }
     #left { width: 220px; }
   }
-  @media (max-width: 640px) {
-    #left { display: none; }
-    #help { display: none; }
-    #title .stat.opt { display: none; }
-    #chronicle { max-height: 120px; }
-    #caption { bottom: 140px; }
+
+  /* ---------- phones ---------- */
+  body.mobile #help, body.mobile .lg { display: none; }
+  body.mobile .sm { display: inline; }
+  body.mobile #b-info { display: inline-block; }
+  body.mobile #top { top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); flex-direction: column; align-items: stretch; gap: 6px; }
+  body.mobile #title { padding: 6px 10px; gap: 4px 10px; font-size: 12px; }
+  body.mobile #title h1 { font-size: 13px; }
+  body.mobile #title .stat.opt { display: none; }
+  body.mobile #controls { margin-left: 0; padding: 4px; gap: 3px; flex-wrap: nowrap; }
+  body.mobile #controls button { flex: 1; padding: 8px 2px; font-size: 12px; min-width: 0; }
+  body.mobile #controls .sep { display: none; }
+  body.mobile #left, body.mobile #right { display: none; }
+  body.mobile #chronicle { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); width: auto; bottom: max(8px, env(safe-area-inset-bottom)); padding: 6px 10px; max-height: none; font-size: 12px; }
+  body.mobile #chronicle li:nth-child(n+3) { display: none; }
+  body.mobile #chronicle li .y { min-width: 46px; }
+  body.mobile #caption { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 70px); font-size: 12px; max-width: 94vw; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; cursor: pointer; }
+  body.mobile #toast { top: calc(max(8px, env(safe-area-inset-top)) + 92px); font-size: 12px; padding: 8px 12px; }
+  body.mobile .label { font-size: 9px; }
+  body.mobile .label small { font-size: 9px; }
+
+  /* Pull-up info sheet */
+  body.mobile.sheet #chronicle, body.mobile.sheet #caption { display: none; }
+  body.mobile.sheet #sheetbar { display: flex; position: fixed; left: 0; right: 0; bottom: calc(52vh - 1px); padding: 8px 10px 0; gap: 6px; background: var(--panel-solid); border-radius: 14px 14px 0 0; border: 1px solid var(--line); border-bottom: 0; z-index: 5; }
+  #sheetbar button { flex: 1; }
+  #sheetbar button.close { flex: 0 0 44px; }
+  body.mobile.sheet-towns #left, body.mobile.sheet-stats #right {
+    display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto;
+    height: 52vh; max-height: none; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    border-radius: 0; background: var(--panel-solid); padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); gap: 10px; z-index: 5;
   }
+  body.mobile.sheet-towns #left { display: block; }
+  body.mobile.sheet-stats #right .panel { background: transparent; border: 0; box-shadow: none; padding: 0; backdrop-filter: none; }
 </style>
 </head>
 <body>
@@ -116,8 +148,9 @@
     <button data-speed="15" title="Speed 15× (4)">15×</button>
     <button data-speed="40" title="Speed 40× (5)">40×</button>
     <span class="sep"></span>
-    <button id="b-cam" class="on" title="Cinematic camera (C)">Auto camera</button>
-    <button id="b-new" title="Start a brand-new world">New world</button>
+    <button id="b-cam" class="on" title="Cinematic camera (C)"><span class="lg">Auto camera</span><span class="sm">🎥</span></button>
+    <button id="b-info" title="Towns and stats">📊</button>
+    <button id="b-new" title="Start a brand-new world"><span class="lg">New world</span><span class="sm">↻</span></button>
   </div>
 </div>
 <div id="left" class="panel"><h2>Civilisations</h2><div id="towns"></div></div>
@@ -130,6 +163,7 @@
     <div class="traits" id="traits"></div>
   </div>
 </div>
+<div id="sheetbar"><button data-tab="towns">Civilisations</button><button data-tab="stats">Evolution</button><button class="close" title="Close">✕</button></div>
 <div id="chronicle" class="panel"><ul id="log"></ul></div>
 <div id="toast" class="panel"></div>
 <div id="caption"></div>

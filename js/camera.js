@@ -19,37 +19,67 @@
       this.clock = 0;
       this.onShot = null; // callback(kind, info)
 
-      let drag = null;
+      // Pointer handling: mouse drag / one finger = orbit, right-drag / shift / two fingers = pan, pinch = zoom.
+      const pts = new Map();
+      let drag = null, pinch = null;
       const el = dom;
+      const panBy = (dx, dy) => {
+        this.follow = null;
+        const s = this.dist * 0.0018;
+        const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+        // right = (cos, 0, -sin), forward = (-sin, 0, -cos)
+        this.goal.x = U.clamp(this.goal.x + (-dx * cy - dy * sy) * s, -70, 70);
+        this.goal.z = U.clamp(this.goal.z + (dx * sy - dy * cy) * s, -70, 70);
+      };
+      const pinchState = () => {
+        const [a, b] = [...pts.values()];
+        return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      };
       el.addEventListener('contextmenu', (e) => e.preventDefault());
       el.addEventListener('pointerdown', (e) => {
-        drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey, moved: false };
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
         el.setPointerCapture(e.pointerId);
+        if (pts.size === 1) drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey, moved: false };
+        else if (pts.size === 2) { pinch = pinchState(); if (drag) drag.moved = true; }
       });
       el.addEventListener('pointermove', (e) => {
+        if (!pts.has(e.pointerId)) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pts.size >= 2 && pinch) {
+          const now = pinchState();
+          this.manual();
+          if (now.d > 0 && pinch.d > 0) this.goalDist = U.clamp(this.goalDist * (pinch.d / now.d), 5, 220);
+          panBy(now.x - pinch.x, now.y - pinch.y);
+          pinch = now;
+          return;
+        }
         if (!drag) return;
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-        if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+        if (Math.abs(dx) + Math.abs(dy) > (e.pointerType === 'touch' ? 8 : 3)) drag.moved = true;
         if (!drag.moved) return;
         this.manual();
         drag.x = e.clientX; drag.y = e.clientY;
-        if (drag.pan) {
-          this.follow = null;
-          const s = this.dist * 0.0018;
-          const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
-          // right = (cos, 0, -sin), forward = (-sin, 0, -cos)
-          this.goal.x += (-dx * cy - dy * sy) * s;
-          this.goal.z += (dx * sy - dy * cy) * s;
-          this.goal.x = U.clamp(this.goal.x, -70, 70); this.goal.z = U.clamp(this.goal.z, -70, 70);
-        } else {
+        if (drag.pan) panBy(dx, dy);
+        else {
           this.yaw -= dx * 0.006;
           this.goalPitch = U.clamp(this.goalPitch + dy * 0.004, 0.12, 1.45);
         }
       });
-      el.addEventListener('pointerup', (e) => {
-        if (drag && !drag.moved && this.onClick) this.onClick(e);
-        drag = null;
-      });
+      const up = (e) => {
+        if (!pts.has(e.pointerId)) return;
+        pts.delete(e.pointerId);
+        if (pts.size === 0) {
+          if (drag && !drag.moved && e.type === 'pointerup' && this.onClick) this.onClick(e);
+          drag = null; pinch = null;
+        } else if (pts.size === 1) {
+          // Lifting one finger of a pinch: continue as a (non-clicking) orbit from the remaining finger.
+          const [p] = [...pts.values()];
+          drag = { x: p.x, y: p.y, pan: false, moved: true };
+          pinch = null;
+        }
+      };
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
       el.addEventListener('wheel', (e) => {
         e.preventDefault();
         this.manual();
@@ -124,10 +154,12 @@
       this.dist += (this.goalDist - this.dist) * (1 - Math.exp(-dt * 1.5));
       this.pitch += (this.goalPitch - this.pitch) * (1 - Math.exp(-dt * 2));
       const cp = Math.cos(this.pitch);
+      // Tall (portrait) screens see less sideways, so pull back to keep the same framing.
+      const dist = this.dist * (this.cam.aspect < 1 ? Math.min(1.7, 0.8 / this.cam.aspect) : 1);
       const pos = new THREE.Vector3(
-        this.target.x + Math.sin(this.yaw) * cp * this.dist,
-        this.target.y + Math.sin(this.pitch) * this.dist,
-        this.target.z + Math.cos(this.yaw) * cp * this.dist,
+        this.target.x + Math.sin(this.yaw) * cp * dist,
+        this.target.y + Math.sin(this.pitch) * dist,
+        this.target.z + Math.cos(this.yaw) * cp * dist,
       );
       const gy = this.R.groundY(pos.x + 64, pos.z + 64) + 1.5;
       if (pos.y < gy) pos.y = gy;

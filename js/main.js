@@ -17,8 +17,10 @@
 
   G.startPixelWorld = function () {
     const canvas = document.getElementById('view');
-    const app = { speed: 2, S: null };
-    app.R = new G.Renderer(canvas);
+    const mobile = matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 700 || window.innerWidth < 640;
+    document.body.classList.toggle('mobile', mobile);
+    const app = { speed: 2, S: null, mobile };
+    app.R = new G.Renderer(canvas, { mobile });
     app.rig = new G.CameraRig(app.R.camera, canvas, app.R);
     app.ui = new G.UI(app);
 
@@ -41,12 +43,28 @@
 
     app.rig.onClick = (e) => {
       const r = canvas.getBoundingClientRect();
-      const id = app.R.pickPerson(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      let id = app.R.pickPerson((x / r.width) * 2 - 1, -(y / r.height) * 2 + 1);
+      if (id == null) id = app.R.nearestPerson(x, y, r.width, r.height, e.pointerType === 'touch' ? 36 : 14);
       if (id != null) { app.rig.manual(); app.rig.followPerson(id); }
     };
 
     const resize = () => app.R.resize(window.innerWidth, window.innerHeight);
     window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+
+    // Keep the screen awake while watching (where supported), and save whenever the page is backgrounded.
+    let wake = null;
+    const keepAwake = async () => {
+      try { if ('wakeLock' in navigator && document.visibilityState === 'visible' && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => (wake = null)); } } catch (e) { /* not allowed yet */ }
+    };
+    keepAwake();
+    window.addEventListener('pointerdown', keepAwake, { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') save(app.S);
+      else { keepAwake(); last = performance.now(); }
+    });
+    window.addEventListener('pagehide', () => save(app.S));
     resize();
 
     window.addEventListener('keydown', (e) => {
