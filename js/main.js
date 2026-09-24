@@ -162,7 +162,15 @@
 
     let last = performance.now(), acc = 0, saveT = 0;
     app.extinctT = 0;
+    let errT = 0;
     function frame(now) {
+      // Queue the next frame first so one bad frame can never stop the world (or its autosave).
+      requestAnimationFrame(frame);
+      try { tick(now); } catch (e) {
+        if (now - errT > 5000) { errT = now; console.error(e); }
+      }
+    }
+    function tick(now) {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       const S = app.S;
@@ -174,15 +182,13 @@
         acc -= STEP; steps++;
         if ((steps & 15) === 0 && performance.now() - t0 > 30) { acc = 0; break; } // never freeze the tab
       }
+      saveT += dt;
+      if (saveT > 10) { saveT = 0; save(S); }
       for (const e of S.fx.events) { app.R.onEvent(e); app.ui.event(e); if (e.big || e.kind === 'space') app.rig.event(e); }
       S.fx.events.length = 0;
       app.rig.update(dt, S);
       app.R.update(S, dt);
       app.ui.frame(S, dt);
-
-      saveT += dt;
-      if (saveT > 10) { saveT = 0; save(S); }
-      requestAnimationFrame(frame);
     }
     window.addEventListener('beforeunload', () => save(app.S));
     document.getElementById('loading').classList.add('gone');

@@ -382,8 +382,8 @@
         const fx = Math.sin(f), fz = Math.cos(f), px = Math.cos(f), pz = -Math.sin(f);
         const shirt = s ? shade(s.color, 0.85 + U.hash(p.id) * 0.3) : 0x888888;
         const skin = SKIN[p.id % SKIN.length];
-        const hair = p.armed && era >= 2 ? 0x8a8e94 : p.age > 58 ? 0xd8d8d8 : HAIR[(p.id * 7) % HAIR.length];
         const era = s ? s.era : 0;
+        const hair = p.armed && era >= 2 ? 0x8a8e94 : p.age > 58 ? 0xd8d8d8 : HAIR[(p.id * 7) % HAIR.length];
         const legsC = s && s.era >= 5 ? 0x34495e : 0x5a4632;
         const headC = p.sick > 0 ? mix(skin, 0x80c060, 0.6) : skin;
         const mark = (k) => { if (k >= 0) this.pick[k] = p.id; };
