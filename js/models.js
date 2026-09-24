@@ -125,15 +125,44 @@
         m.cbox(1, floors * fh, 1, 0.8, 0.3, 0.6, 0x9aa0a6).cbox(1, floors * fh + 0.3, 1, 1.9, 0.06, 1.9, mix(0x888888, tc, 0.6));
         break;
       }
-      default: { // future tower
+      case 7: { // future tower
         const floors = 11 + Math.floor(v * 8), fh = 0.5, H = floors * fh;
         m.cbox(1, 0, 1, 1.4, H, 1.4, 0x9fc6d8);
         for (let f = 1; f < floors; f += 2) m.cbox(1, f * fh, 1, 1.5, 0.06, 1.5, 0xf2f6f8);
         for (const [x, z] of [[0.28, 0.28], [1.72, 0.28], [0.28, 1.72], [1.72, 1.72]]) m.cbox(x, 0, z, 0.07, H + 0.2, 0.07, tc, 2);
         for (let f = 0; f < floors; f += 1) m.windows(0.3, 0.3, 1.4, 1.4, f * fh + 0.2, 0.18, 0.12, win);
         m.cbox(1, H, 1, 1.2, 0.15, 1.2, 0x3f9f4a).cbox(1, H + 0.15, 1, 0.2, 0.2, 0.2, 0x3f8f3a).cbox(1, H + 0.35, 1, 0.6, 0.4, 0.6, 0x4fbf5a);
+        break;
       }
+      default: arcology(m, style - 7, tc, v);
     }
+  }
+
+  // Beyond the Space Age: ever taller arcologies, then floating crowns and halo rings.
+  function arcology(m, tier, tc, v) {
+    const bodies = [0xe4ecf0, 0xd8e4ff, 0xf0e6ff, 0xe0fff4, 0xfff4e0];
+    const body = bodies[tier % bodies.length];
+    const floors = Math.min(40, 14 + tier * 2 + Math.floor(v * 10)), fh = 0.5, H = floors * fh;
+    const seg = [[0, 0.4, 1.85], [0.4, 0.75, 1.5], [0.75, 1, 1.15]];
+    const win = tier >= 3 ? 0xffc8ff : 0x9ff3ff;
+    for (const [a, b, w] of seg) {
+      const y0 = a * H, y1 = b * H;
+      const lift = tier >= 2 && a >= 0.75 ? 1.4 : 0; // the crown floats free
+      m.cbox(1, y0 + lift, 1, w, y1 - y0, w, body);
+      for (let y = y0 + 0.2; y < y1 - 0.2; y += fh) {
+        const t = 0.03, o = 1 - w / 2;
+        m.box(o - t, y + lift, o + 0.1, t, 0.22, w - 0.2, win, 1).box(o + w, y + lift, o + 0.1, t, 0.22, w - 0.2, win, 1);
+        m.box(o + 0.1, y + lift, o - t, w - 0.2, 0.22, t, win, 1).box(o + 0.1, y + lift, o + w, w - 0.2, 0.22, t, win, 1);
+      }
+      m.cbox(1, y1 + lift, 1, w + 0.1, 0.12, w + 0.1, 0x3f9f4a).cbox(1, y1 + lift + 0.12, 1, w * 0.6, 0.25, w * 0.6, 0x4fbf5a);
+      m.cbox(1, y0 + lift, 1, w + 0.08, 0.06, w + 0.08, tc, 2);
+    }
+    if (tier >= 2) m.cbox(1, 0.75 * H, 1, 0.3, 1.5, 0.3, tc, 2);
+    if (tier >= 3) {
+      const r = 1.5, y = 0.55 * H;
+      m.cbox(1, y, 1 - r, 2 * r, 0.1, 0.1, tc, 2).cbox(1, y, 1 + r, 2 * r, 0.1, 0.1, tc, 2).cbox(1 - r, y, 1, 0.1, 0.1, 2 * r, tc, 2).cbox(1 + r, y, 1, 0.1, 0.1, 2 * r, tc, 2);
+    }
+    m.cbox(1, H + (tier >= 2 ? 1.6 : 0.4), 1, 0.08, 1.2, 0.08, 0xffffff, 2);
   }
 
   // ---------- town centres (3x3) ----------
@@ -197,11 +226,21 @@
         m.flag(1.5, 5.4, 1.5, 0.9, tc);
         break;
       }
-      default: {
+      case 7: {
         m.cbox(1.5, 0, 1.5, 2.8, 0.3, 2.8, 0xe8eef2).cbox(1.5, 0.3, 1.5, 1.6, 2.0, 1.6, 0x9fc6d8);
         m.cbox(1.5, 2.3, 1.5, 1.0, 5, 1.0, 0xe8eef2).cbox(1.5, 7.3, 1.5, 0.5, 3, 0.5, 0xe8eef2).cbox(1.5, 10.3, 1.5, 0.12, 1.5, 0.12, tc, 2);
         for (let y = 1; y < 10; y += 1.5) m.cbox(1.5, 2 + y * 0.8, 1.5, 1.8 - y * 0.1, 0.08, 1.8 - y * 0.1, tc, 2);
         m.windows(0.7, 0.7, 1.6, 1.6, 0.8, 0.25, 0.15, WIN(7)).windows(0.7, 0.7, 1.6, 1.6, 1.6, 0.25, 0.15, WIN(7));
+        break;
+      }
+      default: { // space elevator: a tether climbing out of sight
+        const top = 70 + (style - 8) * 10;
+        m.cbox(1.5, 0, 1.5, 3, 0.4, 3, 0xe8eef2).cbox(1.5, 0.4, 1.5, 2.2, 2.4, 2.2, 0xd8e4ff);
+        m.windows(0.4, 0.4, 2.2, 2.2, 0.8, 0.3, 0.15, WIN(7)).windows(0.4, 0.4, 2.2, 2.2, 1.7, 0.3, 0.15, WIN(7));
+        m.cbox(1.5, 2.8, 1.5, 1.2, 1.2, 1.2, 0xbfd0e0).cbox(1.5, 4, 1.5, 0.14, top, 0.14, 0xdfe6ee);
+        for (let y = 8; y < top; y += 7) m.cbox(1.5, 4 + y, 1.5, 0.4, 0.4, 0.4, tc, 2);
+        m.cbox(1.5, 4 + top, 1.5, 3, 1.2, 3, 0xe8eef2).cbox(1.5, 4 + top - 0.1, 1.5, 3.2, 0.1, 3.2, tc, 2);
+        m.cbox(1.5, 2.8, 1.5, 3.1, 0.08, 3.1, tc, 2);
       }
     }
   }
@@ -225,6 +264,11 @@
       m.windows(0.2, 0.2, 2.6, 2.6, 0.3, 0.3, 0.15, 0x3f5a70, 1).windows(0.2, 0.2, 2.6, 2.6, 1.0, 0.3, 0.15, 0x3f5a70, 1);
       m.cbox(2.1, 1.6, 2.1, 0.12, 0.6, 0.12, 0x888888).cbox(2.1, 2.2, 2.1, 0.9, 0.1, 0.9, 0xdddddd).cbox(2.1, 2.3, 2.1, 0.6, 0.08, 0.6, 0xcccccc);
       m.cbox(0.9, 1.6, 0.9, 0.8, 0.4, 0.8, mix(0xcccccc, tc, 0.5));
+    } else if (style >= 8) { // quantum institute: a glowing core inside a glass frame
+      m.cbox(1.5, 0, 1.5, 2.9, 0.3, 2.9, 0xe8eef2);
+      for (const [x, z] of [[0.25, 0.25], [2.75, 0.25], [0.25, 2.75], [2.75, 2.75]]) m.cbox(x, 0.3, z, 0.15, 3, 0.15, 0xe8eef2);
+      m.cbox(1.5, 3.3, 1.5, 2.8, 0.15, 2.8, 0xe8eef2).cbox(1.5, 0.3, 1.5, 2.5, 0.05, 2.5, tc, 2);
+      m.cbox(1.5, 1.0, 1.5, 1.2, 1.2, 1.2, 0xc8a0ff, 2).cbox(1.5, 1.3, 1.5, 1.5, 0.6, 0.6, 0x9ff3ff, 2).cbox(1.5, 1.3, 1.5, 0.6, 0.6, 1.5, 0x9ff3ff, 2);
     } else { // glass campus dome
       for (let i = 0; i < 6; i++) m.cbox(1.5, i * 0.35, 1.5, 2.8 - i * 0.42, 0.35, 2.8 - i * 0.42, i % 2 ? 0x9fd6e8 : 0xbfe6f0, i === 5 ? 2 : 0);
       m.cbox(1.5, 0, 1.5, 2.9, 0.06, 2.9, tc, 2);

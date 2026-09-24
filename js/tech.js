@@ -63,7 +63,7 @@
     house: { w: 2, d: 2, name: 'House', tech: 'shelter',
       cost: (e) => E(e, [{ wood: 5 }, { wood: 12 }, { wood: 6, stone: 10 }, { wood: 6, stone: 14 }, { wood: 10, stone: 14, metal: 2 }, { stone: 20, metal: 5 }, { stone: 30, metal: 12 }, { stone: 40, metal: 20 }]),
       work: (e) => 8 + e * 4,
-      capacity: (e) => E(e, [3, 4, 5, 6, 6, 10, 18, 28]) },
+      capacity: (e) => (e <= 7 ? E(e, [3, 4, 5, 6, 6, 10, 18, 28]) : 28 + (e - 7) * 10) },
     field: { w: 3, d: 3, name: 'Farm Field', tech: 'agriculture', cost: () => ({ wood: 4 }), work: () => 6 },
     pasture: { w: 3, d: 3, name: 'Pasture', tech: 'husbandry', cost: () => ({ wood: 10 }), work: () => 8 },
     granary: { w: 2, d: 2, name: 'Granary', tech: 'pottery', cost: (e) => (e < 2 ? { wood: 15 } : { wood: 10, stone: 15 }), work: () => 14 },
@@ -80,8 +80,48 @@
   };
 
   // Research building name by era.
-  const RESEARCH_NAMES = ['Elders\' Circle', 'Elders\' Circle', 'Library', 'Library', 'University', 'University', 'Laboratory', 'Research Campus'];
-  const researchMult = (e) => [1, 1, 1.6, 1.8, 2.4, 2.7, 3.4, 4.5][e];
+  const RESEARCH_NAMES = ['Elders\' Circle', 'Elders\' Circle', 'Library', 'Library', 'University', 'University', 'Laboratory', 'Research Campus', 'Quantum Institute'];
+  const researchName = (e) => RESEARCH_NAMES[Math.min(e, RESEARCH_NAMES.length - 1)];
+  const researchMult = (e) => [1, 1, 1.6, 1.8, 2.4, 2.7, 3.4, 4.5][Math.min(e, 7)] * (e > 7 ? 1 + 0.08 * Math.min(e - 7, 10) : 1);
 
-  G.TECHDATA = { ERAS, TECHS, TECH, BUILDINGS, RESEARCH_NAMES, researchMult };
+  // ---------- Endless future technology ----------
+  // After Starships the tree continues forever: a chain of ever-harder discoveries,
+  // and every four of them opens a new age with new architecture.
+  const FUTURE_NAMES = ['Nanotechnology', 'Arcologies', 'Space Elevators', 'Quantum Computing', 'Weather Control', 'Antimatter Engines',
+    'Terraforming', 'Orbital Rings', 'Genetic Mastery', 'Mind-Machine Link', 'Dyson Swarms', 'Wormhole Theory', 'Matter Replication',
+    'Stellar Engineering', 'Time Crystals', 'Hyperspace', 'Living Cities', 'Consciousness Transfer', 'Galactic Cartography', 'Star Lifting'];
+  const FUTURE_AGES = ['Stellar Age', 'Galactic Age', 'Transcendent Age', 'Cosmic Age', 'Eternal Age'];
+  const roman = (n) => ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n] || String(n);
+  const eraName = (e) => {
+    if (e < ERAS.length) return ERAS[e];
+    const k = e - ERAS.length;
+    const base = FUTURE_AGES[k % FUTURE_AGES.length];
+    const lap = Math.floor(k / FUTURE_AGES.length);
+    return lap ? `${base} ${roman(lap + 1)}` : base;
+  };
+  const futureCache = {};
+  function future(n) {
+    if (futureCache[n]) return futureCache[n];
+    const L = FUTURE_NAMES.length;
+    const lap = Math.floor((n - 1) / L);
+    const t = {
+      id: 'f' + n, n, future: true,
+      name: FUTURE_NAMES[(n - 1) % L] + (lap ? ' ' + roman(lap + 1) : ''),
+      era: 8 + Math.floor((n - 1) / 5),
+      cost: Math.round(16000 * Math.pow(1.13, n - 1)),
+      req: [n === 1 ? 'starships' : 'f' + (n - 1)],
+      desc: 'A leap beyond anything before it.',
+    };
+    return (futureCache[n] = t);
+  }
+  const tech = (id) => TECH[id] || (id && id[0] === 'f' && +id.slice(1) > 0 ? future(+id.slice(1)) : null);
+  const futureCount = (known) => { let n = 0; while (known['f' + (n + 1)]) n++; return n; };
+  // Everything a town could research next.
+  const available = (known) => {
+    const out = TECHS.filter((t) => !known[t.id] && t.req.every((r) => known[r]));
+    if (known.starships) out.push(future(futureCount(known) + 1));
+    return out;
+  };
+
+  G.TECHDATA = { ERAS, TECHS, TECH, BUILDINGS, RESEARCH_NAMES, researchName, researchMult, eraName, tech, future, futureCount, available };
 })(typeof window !== 'undefined' ? window : globalThis);

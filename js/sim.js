@@ -2,11 +2,30 @@
 (function (G) {
   const U = G.U, W = G.WORLD, TD = G.TECHDATA;
   const { T, R, N } = W;
-  const { TECH, TECHS, BUILDINGS, ERAS } = TD;
+  const { TECHS, BUILDINGS } = TD;
 
   const DAY = 30;          // sim-seconds per day
   const YEAR = 60;         // sim-seconds per year
-  const MAX_POP = 420;
+  const BASE_POP = 420;
+  const maxPop = (S) => BASE_POP + 35 * U.clamp(S.globalEra - 7, 0, 4);
+
+  // Inherited mutations. Good ones spread because their carriers live longer or have more children.
+  const MUTATIONS = {
+    longevity: { name: 'Long-lived', good: true, w: 1 },
+    genius: { name: 'Genius', good: true, w: 1 },
+    mighty: { name: 'Mighty', good: true, w: 1 },
+    resistant: { name: 'Plague-resistant', good: true, w: 1 },
+    fertile: { name: 'Fertile', good: true, w: 0.8 },
+    hardy: { name: 'Cold-hardy', good: true, w: 1 },
+    swift: { name: 'Swift', good: true, w: 1 },
+    giant: { name: 'Giant', good: true, w: 0.6 },
+    frail: { name: 'Frail', good: false, w: 1.4 },
+    dim: { name: 'Slow-witted', good: false, w: 1.2 },
+  };
+  const mut = (p, k) => !!(p.mut && p.mut.includes(k));
+  // How attractive / fit a person is: drives partner choice and fertility.
+  const fitness = (p) => (p.traits.str + p.traits.int * 1.4 + p.traits.con * 1.3 + p.traits.cur * 0.4) / 4.1 +
+    (p.mut ? p.mut.reduce((a, k) => a + (MUTATIONS[k].good ? 0.12 : -0.2), 0) : 0) + (p.health - 1) * 0.3;
   const MAX_SETTLEMENTS = 10;
   const WALK = 2.4;        // tiles per sim-second
 
@@ -45,7 +64,8 @@
       people: [], settlements: [], buildings: [], animals: [], burning: [],
       nextId: 1, chronicle: [], history: [], globalEra: 0, usedColors: [],
       timers: { world: 0, settle: 0, year: 0, animals: 0, pair: 0, diffuse: 0, event: YEAR * 3 },
-      stats: { births: 0, deaths: 0, launches: 0, starships: 0 },
+      stats: { births: 0, deaths: 0, launches: 0, starships: 0, wars: 0, darkAges: 0, quakes: 0 },
+      climate: { temp: 0, target: 0, next: YEAR * U.rand(35, 70) }, wars: [], colonies: [], bestKnown: {}, extinctT: 0,
     };
     attach(S);
     // Wildlife.
@@ -53,23 +73,26 @@
       const i = randomTile(S, (i) => S.world.type[i] === T.GRASS && S.world.res[i] === R.NONE);
       if (i >= 0) spawnDeer(S, i % N + 0.5, Math.floor(i / N) + 0.5);
     }
-    // Founding tribes.
-    const sites = [];
-    for (let k = 0; k < 3; k++) {
-      const site = findSettlementSite(S, sites, null);
-      if (!site) break;
-      sites.push(site);
-      const s = makeSettlement(S, site, null);
-      for (let c = 0; c < 4; c++) {
-        const m = makePerson(S, s, site.x + U.rand(-2, 2), site.z + U.rand(-2, 2), U.rand(17, 30), null);
-        const f = makePerson(S, s, site.x + U.rand(-2, 2), site.z + U.rand(-2, 2), U.rand(17, 30), null);
-        m.sex = 'M'; f.sex = 'F'; m.partner = f.id; f.partner = m.id;
-      }
-      for (let c = 0; c < 3; c++) makePerson(S, s, site.x + U.rand(-2, 2), site.z + U.rand(-2, 2), U.rand(2, 11), null);
-      s.stock.food = 45; s.stock.wood = 10;
-      log(S, `The ${s.name} tribe gathers around a patch of land.`, { sid: s.id, x: s.cx, z: s.cz });
-    }
+    for (let k = 0; k < 3; k++) spawnTribe(S, null);
     return S;
+  }
+
+  // A fresh band of people arrives. `known` lets returning star-colonists bring their knowledge back.
+  function spawnTribe(S, known, text) {
+    const site = findSettlementSite(S, [], null);
+    if (!site) return null;
+    const s = makeSettlement(S, site, known ? { known, era: Math.max(0, ...Object.keys(known).map((id) => TD.tech(id)?.era || 0)) } : null);
+    const b = getB(S, s.centerB);
+    if (b && known) { b.built = true; b.progress = 1; b.upgrading = false; }
+    for (let c = 0; c < 4; c++) {
+      const m = makePerson(S, s, site.x + U.rand(-2, 2), site.z + U.rand(-2, 2), U.rand(17, 30), null);
+      const f = makePerson(S, s, site.x + U.rand(-2, 2), site.z + U.rand(-2, 2), U.rand(17, 30), null);
+      m.sex = 'M'; f.sex = 'F'; m.partner = f.id; f.partner = m.id;
+    }
+    for (let c = 0; c < 3; c++) makePerson(S, s, site.x + U.rand(-2, 2), site.z + U.rand(-2, 2), U.rand(2, 11), null);
+    s.stock.food = 45; s.stock.wood = known ? 60 : 10; s.stock.stone = known ? 40 : 0;
+    log(S, text ? text(s) : `The ${s.name} tribe gathers around a patch of land.`, { sid: s.id, x: s.cx, z: s.cz, big: !!text, kind: text ? 'colony' : 'info' });
+    return s;
   }
 
   function randomTile(S, pred, tries = 2000) {
@@ -106,8 +129,8 @@
       const others = existing.concat(S.settlements.filter((s) => s.alive).map((s) => ({ x: s.cx, z: s.cz })));
       let minD = 1e9;
       for (const o of others) minD = Math.min(minD, U.dist(cx, cz, o.x, o.z));
-      if (minD < (parent ? 22 : 34)) continue;
-      if (parent && U.dist(cx, cz, parent.cx, parent.cz) > 60) continue;
+      if (minD < (parent && parent.id ? 22 : 30)) continue;
+      if (parent && parent.id && U.dist(cx, cz, parent.cx, parent.cz) > 60) continue;
       let score = 0, water = false, flat = 0;
       for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
         const xx = x + 1 + dx, zz = z + 1 + dz;
@@ -120,7 +143,7 @@
         if (Wd.type[j] === T.GRASS && Math.abs(Wd.h[j] - Wd.h[i]) <= 1) flat++;
       }
       score += (water ? 15 : 0) + flat * 0.15 + Math.random() * 10;
-      if (parent) score -= U.dist(cx, cz, parent.cx, parent.cz) * 0.2;
+      if (parent && parent.id) score -= U.dist(cx, cz, parent.cx, parent.cz) * 0.2;
       if (score > bestScore) { bestScore = score; best = { x: cx, z: cz, tx: x, tz: z }; }
     }
     return best;
@@ -135,12 +158,15 @@
       known: parent ? Object.assign({}, parent.known) : {}, era: parent ? parent.era : 0,
       research: null, stock: { food: 0, wood: 0, stone: 0, metal: 0 }, wanted: null,
       foundedT: S.t, lastColony: S.t, parent: parent ? parent.id : null, pop: 0, centerB: -1,
-      jobs: {}, peakPop: 0, noSpace: {},
+      jobs: {}, peakPop: 0, noSpace: {}, order: parent && parent.order ? parent.order.slice() : Object.keys(parent ? parent.known : {}),
+      rel: {}, popLog: [], lastDark: -1e9, fut: 0,
     };
+    s.fut = TD.futureCount(s.known);
     S.settlements.push(s); S.cache.s.set(s.id, s);
     const b = placeBuilding(S, s, 'center', site.tx, site.tz, s.era, !parent);
     s.centerB = b.id;
     if (parent) { b.built = true; b.progress = 0; b.upgrading = true; } // colonists raise it on arrival
+    if (parent && parent.id) { s.rel[parent.id] = 40; parent.rel[s.id] = 40; }
     return s;
   }
 
@@ -148,14 +174,34 @@
     const t = {};
     for (const k of ['str', 'int', 'con', 'cur']) {
       const base = a && b ? (a.traits[k] + b.traits[k]) / 2 : 1;
-      t[k] = U.clamp(base + U.gauss() * (a ? 0.06 : 0.12), 0.5, 2.2);
+      t[k] = U.clamp(base + U.gauss() * (a ? 0.07 : 0.12), 0.4, 3);
     }
     return t;
+  }
+
+  function inheritMutations(a, b) {
+    const out = [];
+    if (a && b) {
+      for (const k of new Set([...(a.mut || []), ...(b.mut || [])])) {
+        const both = mut(a, k) && mut(b, k);
+        if (Math.random() < (both ? 0.8 : 0.5)) out.push(k);
+      }
+    }
+    // Something brand new, now and then.
+    if (Math.random() < 0.03) {
+      const keys = Object.keys(MUTATIONS).filter((k) => !out.includes(k));
+      const k = U.weightedPick(keys, (k) => MUTATIONS[k].w);
+      if (k) out.push(k);
+    }
+    return out;
   }
 
   function makePerson(S, s, x, z, age, parents) {
     const [a, b] = parents || [];
     const traits = inheritTraits(a, b);
+    const muts = inheritMutations(a, b);
+    if (muts.includes('giant')) traits.str = Math.min(3, traits.str + 0.25);
+    if (muts.includes('dim')) traits.int = Math.max(0.4, traits.int - 0.25);
     const p = {
       id: nid(S), name: U.personName(), sid: s.id, sex: Math.random() < 0.5 ? 'M' : 'F', age,
       x, z, tx: x, tz: z, moving: false, facing: Math.random() * 6.28,
@@ -163,8 +209,13 @@
       skills: { gather: 0.1, build: 0.1, research: 0.1 },
       home: -1, partner: -1, parents: parents ? [a.id, b.id] : [], kids: 0,
       task: null, job: null, carry: null, asleep: false, thought: 'Looking around',
-      life: 46 + U.gauss() * 7 + (traits.con - 1) * 25, mode: 'walk', gen: parents ? Math.max(a.gen, b.gen) + 1 : 1,
+      life: 46 + U.gauss() * 7 + (traits.con - 1) * 25 + (muts.includes('longevity') ? 15 : 0) - (muts.includes('frail') ? 14 : 0),
+      mode: 'walk', gen: parents ? Math.max(a.gen, b.gen) + 1 : 1, mut: muts,
     };
+    if (a && b && muts.length && muts.some((k) => !mut(a, k) && !mut(b, k)) && Math.random() < 0.25) {
+      const k = muts.find((k) => !mut(a, k) && !mut(b, k));
+      log(S, `${p.name} is born in ${s.name} with a new trait: ${MUTATIONS[k].name.toLowerCase()}.`, { sid: s.id, x, z, kind: 'evo' });
+    }
     if (a && b) {
       // Children pick up a little of their parents' know-how.
       for (const k in p.skills) p.skills[k] = 0.1 + ((a.skills[k] + b.skills[k]) / 2) * 0.15;
@@ -313,7 +364,7 @@
     s.wanted = null;
     if (['research', 'market', 'temple', 'factory', 'power', 'hospital', 'launchpad', 'reactor', 'windmill', 'smithy'].includes(b.type) && !s['first_' + b.type]) {
       s['first_' + b.type] = true;
-      const name = b.type === 'research' ? TD.RESEARCH_NAMES[s.era] : BUILDINGS[b.type].name;
+      const name = b.type === 'research' ? TD.researchName(s.era) : BUILDINGS[b.type].name;
       log(S, `${s.name} begins building a ${name.toLowerCase()}.`, { sid: s.id, x: b.x + 1, z: b.z + 1 });
     }
   }
@@ -325,14 +376,14 @@
     const s = getS(S, b.sid);
     if (!s) return;
     if (b.type === 'center' && wasUpgrade && s.era > 0 && b.style === s.era) {
-      if (b.style >= 2) log(S, `${s.name} completes a new ${ERAS[s.era].replace(' Age', '')}-era town hall.`, { sid: s.id, x: b.x + 1.5, z: b.z + 1.5 });
+      if (b.style >= 2) log(S, `${s.name} completes a new ${TD.eraName(s.era).replace(' Age', '')}-era town hall.`, { sid: s.id, x: b.x + 1.5, z: b.z + 1.5 });
     }
     if (b.type === 'launchpad') log(S, `${s.name} completes a launch pad. The sky is no longer the limit.`, { sid: s.id, x: b.x + 2, z: b.z + 2, big: true });
   }
 
   // ---------- research ----------
   function pickResearch(S, s) {
-    const avail = TECHS.filter((t) => !s.known[t.id] && t.req.every((r) => s.known[r]));
+    const avail = TD.available(s.known);
     if (!avail.length) { s.research = null; return; }
     const Wd = S.world;
     const t = U.weightedPick(avail, (t) => {
@@ -347,12 +398,15 @@
   function learn(S, s, id) {
     if (s.known[id]) return;
     s.known[id] = true;
-    const t = TECH[id];
+    s.order.push(id);
+    s.fut = TD.futureCount(s.known);
+    const t = TD.tech(id);
+    if (!S.bestKnown[id]) S.bestKnown[id] = true;
     const firstEver = !S.settlements.some((o) => o !== s && o.known[id]);
     log(S, `${s.name} discovered ${t.name}${firstEver ? ' — a world first!' : '.'}`, { sid: s.id, x: s.cx, z: s.cz, big: firstEver, kind: 'tech' });
     if (t.era > s.era) {
       s.era = t.era;
-      log(S, `${s.name} has entered the ${ERAS[s.era]}!`, { sid: s.id, x: s.cx, z: s.cz, big: true, kind: 'era' });
+      log(S, `${s.name} has entered the ${TD.eraName(s.era)}!`, { sid: s.id, x: s.cx, z: s.cz, big: true, kind: 'era' });
       if (s.era > S.globalEra) S.globalEra = s.era;
     }
     if (id === 'electricity' || id === 'masonry' || id === 'combustion') for (let i = 0; i < N * N; i++) if (S.world.road[i]) S.fx.tiles.add(i);
@@ -363,15 +417,32 @@
     if (!s.research) pickResearch(S, s);
     if (!s.research) return;
     s.research.rp += rp;
-    const t = TECH[s.research.id];
+    const t = TD.tech(s.research.id);
     if (s.research.rp >= t.cost) { const carry = s.research.rp - t.cost; learn(S, s, t.id); if (s.research) s.research.rp = Math.min(carry, 20); }
   }
 
   const researchBonus = (s) =>
     (has(s, 'language') ? 1.2 : 1) * (has(s, 'writing') ? 1.2 : 1) * (has(s, 'printing') ? 1.35 : 1) *
-    (has(s, 'computers') ? 1.4 : 1) * (has(s, 'ai') ? 1.6 : 1);
-  const toolMult = (s) => 1 + (has(s, 'stone_tools') ? 0.35 : 0) + (has(s, 'bronze') ? 0.3 : 0) + (has(s, 'iron') ? 0.3 : 0) + (has(s, 'industry') ? 0.5 : 0);
-  const lifeBonus = (S, s) => (has(s, 'weaving') ? 4 : 0) + (has(s, 'medicine') ? 9 : 0) + (has(s, 'modern_medicine') ? 18 : 0) + (has(s, 'ai') ? 6 : 0);
+    (has(s, 'computers') ? 1.4 : 1) * (has(s, 'ai') ? 1.6 : 1) * Math.pow(1.03, s.fut || 0);
+  const toolMult = (s) => 1 + (has(s, 'stone_tools') ? 0.35 : 0) + (has(s, 'bronze') ? 0.3 : 0) + (has(s, 'iron') ? 0.3 : 0) + (has(s, 'industry') ? 0.5 : 0) + (s.fut || 0) * 0.05;
+  const lifeBonus = (S, s) => (has(s, 'weaving') ? 4 : 0) + (has(s, 'medicine') ? 9 : 0) + (has(s, 'modern_medicine') ? 18 : 0) + (has(s, 'ai') ? 6 : 0) + Math.min(40, (s ? s.fut || 0 : 0) * 1.5);
+
+  // Knowledge can be lost when a town is devastated.
+  function forget(S, s, n) {
+    const lost = [];
+    while (n-- > 0 && s.order.length > 3) {
+      const id = s.order.pop();
+      delete s.known[id];
+      lost.push(TD.tech(id).name);
+    }
+    s.fut = TD.futureCount(s.known);
+    s.era = Math.max(0, ...Object.keys(s.known).map((id) => TD.tech(id)?.era || 0));
+    if (s.research && !TD.tech(s.research.id).req.every((r) => s.known[r])) s.research = null;
+    return lost;
+  }
+
+  // Climate: 1 = warm, 0 = normal, -1 = deep ice age.
+  const foodMult = (S) => U.clamp(1 + S.climate.temp * 0.45, 0.5, 1.2);
 
   // ---------- people: movement ----------
   function goTo(p, x, z) { p.tx = x; p.tz = z; p.moving = true; }
@@ -389,6 +460,7 @@
     else if (Wd.type[ti] >= T.ROCK) sp *= 0.75;
     if (p.age < 12) sp *= 0.8; else if (p.age > 55) sp *= 0.8;
     if (has(s, 'wheel') && p.carry) sp *= 1.2;
+    if (mut(p, 'swift')) sp *= 1.2;
     let mode = water ? (has(s, 'sailing') ? 'boat' : 'swim') : 'walk';
     if (!water && has(s, 'combustion') && p.age >= 16 && d > 7) { sp *= 2.6; mode = 'car'; }
     p.mode = mode;
@@ -434,8 +506,9 @@
       stone: (e >= 2 || cost.stone ? 0.1 + need('stone', e >= 2 ? 15 + e * 5 : 0) * 2.2 : 0) * p.traits.str,
       metal: has(s, 'mining') ? (0.05 + need('metal', e >= 4 ? 10 : 0) * 2.2) * p.traits.str : 0,
       build: sites.length ? 1.2 * Math.min(3, sites.length) : 0,
-      research: (0.55 + e * 0.05) * p.traits.int * p.traits.int * (p.age > 50 ? 2.5 : 1) * (foodNeed > 0.7 ? 0.3 : 1),
+      research: (0.55 + Math.min(e, 8) * 0.05) * p.traits.int * p.traits.int * (p.age > 50 ? 2.5 : 1) * (foodNeed > 0.7 ? 0.3 : 1),
       trade: has(s, 'currency') && S.settlements.filter((o) => o.alive).length > 1 ? 0.12 : 0,
+      war: p.age >= 16 && p.age <= 48 && S.wars.some((w) => w.a === s.id || w.b === s.id) ? 1.1 * p.traits.str * (foodNeed > 0.8 ? 0.4 : 1) : 0,
     };
     for (const j in w) {
       w[j] *= crowd(j);
@@ -466,6 +539,7 @@
     } else if (job === 'wood') ok = startTask(S, p, s, 'chop');
     else if (job === 'stone') ok = startTask(S, p, s, 'quarry');
     else if (job === 'metal') ok = (Math.random() < 0.6 && startTask(S, p, s, 'manufacture')) || startTask(S, p, s, 'mine');
+    else if (job === 'war') ok = startTask(S, p, s, 'fight');
     else ok = startTask(S, p, s, job);
     if (!ok) startTask(S, p, s, 'wander');
   }
@@ -507,7 +581,7 @@
           return false;
         }
         if (task.stage === 1) {
-          task.timer -= dt * (0.7 + p.skills.gather * 0.6);
+          task.timer -= dt * (0.7 + p.skills.gather * 0.6) * (mut(p, 'mighty') ? 1.3 : 1);
           p.working = true;
           if (task.timer > 0) return false;
           p.working = false;
@@ -561,7 +635,7 @@
     harvest: (S, s, i) => {
       const Wd = S.world, got = Math.min(3, Math.floor(Wd.amt[i]));
       Wd.amt[i] -= got; if (Wd.amt[i] < 1) S.fx.tiles.add(i);
-      return { type: 'food', amt: got * (has(s, 'fire') ? 1.2 : 1) };
+      return { type: 'food', amt: got * (has(s, 'fire') ? 1.2 : 1) * foodMult(S) };
     },
   });
   TASKS.chop = gatherTask({
@@ -670,7 +744,7 @@
           if (b.growth >= 1) {
             b.growth = 0; S.fx.bld.add(b.id);
             const mills = S.buildings.filter((m) => m.sid === s.id && m.type === 'windmill' && m.built).length;
-            p.carry = { type: 'food', amt: Math.round(amount * (1 + Math.min(mills, 3) * 0.2) * (has(s, 'industry') ? 1.4 : 1)) };
+            p.carry = { type: 'food', amt: Math.round(amount * (1 + Math.min(mills, 3) * 0.2) * (has(s, 'industry') ? 1.4 : 1) * foodMult(S) * (1 + (s.fut || 0) * 0.03)) };
             if (has(s, 'wheel')) p.carry.amt = Math.round(p.carry.amt * 1.3);
             addResearch(S, s, 0.4 * researchBonus(s));
             const d = dropPoint(S, s, p);
@@ -705,7 +779,7 @@
       const ex = side === 0 ? b.x - 0.3 : side === 1 ? b.x + b.w + 0.3 : b.x + U.rand(0, b.w);
       const ez = side === 2 ? b.z - 0.3 : side === 3 ? b.z + b.d + 0.3 : b.z + U.rand(0, b.d);
       goTo(p, side < 2 ? ex : ex, side < 2 ? b.z + U.rand(0, b.d) : ez);
-      const name = b.type === 'research' ? TD.RESEARCH_NAMES[b.style] : BUILDINGS[b.type].name;
+      const name = b.type === 'research' ? TD.researchName(b.style) : BUILDINGS[b.type].name;
       p.thought = `${b.upgrading ? 'Rebuilding' : 'Building'} the ${name.toLowerCase()}`;
       return true;
     },
@@ -730,13 +804,13 @@
       const r = researchSpot(S, s);
       task.mult = r.b ? TD.researchMult(r.b.style) : 1;
       goTo(p, r.x + U.rand(-1, 1), r.z + U.rand(-1, 1));
-      p.thought = s.research ? `Pondering ${TECH[s.research.id].name}` : 'Thinking about the world';
+      p.thought = s.research ? `Pondering ${TD.tech(s.research.id).name}` : 'Thinking about the world';
       return true;
     },
     update(S, p, s, task, dt) {
       if (task.stage === 0) { if (p.moving) return false; task.stage = 1; task.timer = 12; return false; }
       p.working = true;
-      const rate = 0.32 * p.traits.int * (0.5 + p.skills.research) * task.mult * researchBonus(s) * (p.age > 50 ? 1.3 : 1);
+      const rate = 0.32 * p.traits.int * (0.5 + p.skills.research) * task.mult * researchBonus(s) * (p.age > 50 ? 1.3 : 1) * (mut(p, 'genius') ? 1.6 : 1);
       addResearch(S, s, rate * dt);
       p.skills.research = Math.min(1, p.skills.research + dt * 0.002);
       task.timer -= dt;
@@ -744,8 +818,8 @@
         p.working = false;
         // Eureka moments favour the curious and clever.
         if (s.research && Math.random() < 0.012 * p.traits.cur * p.traits.int) {
-          const t = TECH[s.research.id];
-          addResearch(S, s, t.cost * 0.25);
+          const t = TD.tech(s.research.id);
+          addResearch(S, s, Math.min(t.cost * 0.25, 250 + 40 * s.era));
           if (Math.random() < 0.08) log(S, `Eureka! ${p.name} of ${s.name} had a breakthrough.`, { sid: s.id, x: p.x, z: p.z });
         }
         return true;
@@ -756,7 +830,7 @@
 
   TASKS.trade = {
     start(S, p, s, task) {
-      const others = S.settlements.filter((o) => o.alive && o.id !== s.id && U.dist(o.cx, o.cz, s.cx, s.cz) < 75);
+      const others = S.settlements.filter((o) => o.alive && o.id !== s.id && U.dist(o.cx, o.cz, s.cx, s.cz) < 75 && !atWar(S, s, o));
       if (!others.length) return false;
       const o = U.pick(others);
       task.dest = o.id;
@@ -774,6 +848,7 @@
           shareKnowledge(S, s, o, 0.2, p);
           shareKnowledge(S, o, s, 0.2, null);
           s.stock.food += 3;
+          s.rel[o.id] = Math.min(100, (s.rel[o.id] || 0) + 4); o.rel[s.id] = Math.min(100, (o.rel[s.id] || 0) + 4);
         }
         goTo(p, s.cx + U.rand(-1, 1), s.cz + U.rand(-1, 1));
         p.thought = 'Heading home from the market';
@@ -789,7 +864,7 @@
     if (!to.research) pickResearch(S, to);
     if (!to.research) return;
     if (from.known[to.research.id]) {
-      const t = TECH[to.research.id];
+      const t = TD.tech(to.research.id);
       to.research.rp += t.cost * frac;
       if (trader && Math.random() < 0.12) log(S, `Traders from ${from.name} taught ${to.name} about ${t.name}.`, { sid: to.id, x: to.cx, z: to.cz });
       if (to.research.rp >= t.cost) addResearch(S, to, 0);
@@ -815,6 +890,64 @@
       s.stock.metal += task.factory ? 4 : 1.5;
       if (task.factory) s.stock.stone += 2;
       addResearch(S, s, 0.4 * researchBonus(s));
+      return true;
+    },
+  };
+
+  const atWar = (S, a, b) => S.wars.some((w) => (w.a === a.id && w.b === b.id) || (w.a === b.id && w.b === a.id));
+  const enemiesOf = (S, s) => S.wars.filter((w) => w.a === s.id || w.b === s.id).map((w) => getS(S, w.a === s.id ? w.b : w.a)).filter((o) => o && o.alive);
+  const military = (s) => 1 + Math.min(s.era, 10) * 0.25 + (has(s, 'bronze') ? 0.3 : 0) + (has(s, 'iron') ? 0.4 : 0);
+
+  TASKS.fight = {
+    start(S, p, s, task) {
+      const foes = enemiesOf(S, s);
+      if (!foes.length) return false;
+      const o = U.pick(foes);
+      task.foe = o.id;
+      goTo(p, o.cx + U.rand(-5, 5), o.cz + U.rand(-5, 5));
+      p.armed = true;
+      p.thought = `Marching to war against ${o.name}`;
+      return true;
+    },
+    update(S, p, s, task, dt) {
+      const o = getS(S, task.foe);
+      if (!o || !o.alive || !atWar(S, s, o)) { p.armed = false; if (p.carry) goTo(p, s.cx, s.cz); return !p.moving; }
+      if (task.stage === 0) { if (p.moving) return false; task.stage = 1; task.timer = 5; p.thought = `Fighting ${o.name}`; return false; }
+      if (task.stage === 1) {
+        p.working = true;
+        task.timer -= dt;
+        if (task.timer > 0) return false;
+        p.working = false;
+        const w = S.wars.find((w) => (w.a === s.id && w.b === o.id) || (w.a === o.id && w.b === s.id));
+        // Skirmish with the nearest defender.
+        let foe = null, fd = 6;
+        for (const q of S.people) if (q.sid === o.id && q.age >= 14) { const d = U.dist(q.x, q.z, p.x, p.z); if (d < fd) { fd = d; foe = q; } }
+        if (foe) {
+          const mine = p.traits.str * military(s) * U.rand(0.5, 1.5) * (mut(p, 'giant') ? 1.3 : 1);
+          const theirs = foe.traits.str * military(o) * U.rand(0.5, 1.5) * 1.15 * (mut(foe, 'giant') ? 1.3 : 1); // defenders' advantage
+          const loser = mine > theirs ? foe : p;
+          loser.health -= U.rand(0.4, 1.1);
+          if (loser.health <= 0) { die(S, loser, 'war'); if (w) w.dead[loser.sid === w.a ? 0 : 1]++; }
+          if (p.dead) return true;
+        }
+        // Raid their stores, and sometimes torch a building.
+        if (Math.random() < 0.35 && o.stock.food > 5) {
+          const amt = Math.min(20, Math.floor(o.stock.food * 0.1));
+          o.stock.food -= amt;
+          p.carry = { type: 'food', amt };
+        }
+        if (Math.random() < 0.06) {
+          const targets = S.buildings.filter((b) => b.sid === o.id && b.built && b.type !== 'center' && !b.fire);
+          if (targets.length) { const b = U.pick(targets); b.fire = 10; S.fx.bld.add(b.id); }
+        }
+        task.stage = 2;
+        goTo(p, s.cx + U.rand(-2, 2), s.cz + U.rand(-2, 2));
+        p.thought = 'Returning from battle';
+        return false;
+      }
+      if (p.moving) return false;
+      deposit(S, s, p);
+      p.armed = false;
       return true;
     },
   };
@@ -896,13 +1029,19 @@
   function updatePerson(S, p, dt) {
     const s = getS(S, p.sid);
     p.age += dt / YEAR;
-    p.hunger += dt / DAY * (p.asleep ? 0.5 : 1);
+    const cold = Math.max(0, -S.climate.temp) * (mut(p, 'hardy') ? 0.15 : 0.45);
+    p.hunger += dt / DAY * (p.asleep ? 0.5 : 1) * (1 + cold) * (mut(p, 'giant') ? 1.15 : 1);
     if (p.hunger > 1.4) { p.health -= dt * 0.025; p.thought = 'Starving...'; }
     else p.health = Math.min(1, p.health + dt * 0.004);
     if (p.sick > 0) {
       p.sick -= dt;
       const med = has(s, 'modern_medicine') ? 0.85 : has(s, 'medicine') ? 0.5 : 0;
-      p.health -= dt * 0.022 * (1 - med) / p.traits.con;
+      p.health -= dt * 0.022 * (1 - med) / p.traits.con * (mut(p, 'resistant') ? 0.3 : 1) * (mut(p, 'frail') ? 1.5 : 1);
+    }
+    // Infant mortality weeds out the weak, less so with medicine.
+    if (p.age < 5) {
+      const med = has(s, 'modern_medicine') ? 0.9 : has(s, 'medicine') ? 0.6 : 0;
+      if (Math.random() < (dt / YEAR) * 0.05 * Math.max(0, 2.1 - p.traits.con) * (mut(p, 'frail') ? 2 : 1) * (1 - med)) return die(S, p, 'infancy');
     }
     if (p.health <= 0) return die(S, p, p.sick > 0 ? 'illness' : 'starvation');
     if (p.age > p.life + lifeBonus(S, s)) return die(S, p, 'old age');
@@ -916,6 +1055,7 @@
     }
     // Wake at night-time into sleep if caught mid-task (not builders mid-beam; they stop on their own).
     if (p.task && isNight(S) && ['wander', 'play', 'toddle', 'learn', 'research'].includes(p.task.kind)) { endTask(S, p); p.working = false; }
+    if (!p.task) p.armed = false;
     if (p.hunger > 1.0 && p.task && p.task.kind !== 'eat' && !p.carry && s.stock.food >= 1 && Math.random() < dt) { endTask(S, p); startTask(S, p, s, 'eat'); }
   }
 
@@ -925,7 +1065,15 @@
     s.pop = members.length;
     s.peakPop = Math.max(s.peakPop, s.pop);
     if (!s.pop) {
-      if (s.alive) { s.alive = false; log(S, `${s.name} has been abandoned.`, { sid: s.id, x: s.cx, z: s.cz, big: true }); }
+      if (s.alive) {
+        s.alive = false; s.diedT = S.t;
+        S.wars = S.wars.filter((w) => w.a !== s.id && w.b !== s.id);
+        log(S, `${s.name} has been abandoned. Its ruins will slowly crumble.`, { sid: s.id, x: s.cx, z: s.cz, big: true, kind: 'disaster' });
+      }
+      // Ruins crumble over the years, freeing the land for new settlers.
+      for (const b of S.buildings.filter((b) => b.sid === s.id)) {
+        if (Math.random() < dt / (YEAR * 12)) { S.fx.events.push({ kind: 'dust', x: b.x + b.w / 2, z: b.z + b.d / 2 }); removeBuilding(S, b); }
+      }
       return;
     }
     s.jobs = {};
@@ -946,12 +1094,14 @@
     const cap = houses.reduce((a, b) => a + capacity(b), 0);
     const housing = has(s, 'shelter') ? (cap > s.pop ? 1 : 0.04) : s.pop < 14 ? 0.5 : 0.08;
     const food = s.stock.food > s.pop * 2 ? 1 : s.stock.food > s.pop * 0.7 ? 0.35 : 0.03;
-    const global = S.people.length >= MAX_POP ? 0 : 1 - S.people.length / (MAX_POP * 1.3);
+    const MP = maxPop(S);
+    const global = (S.people.length >= MP ? 0 : 1 - S.people.length / (MP * 1.3)) * (s.pop > 140 ? 0.3 : 1);
     for (const m of members) {
       if (m.sex !== 'F' || m.age < 17 || m.age > 42 || m.partner < 0) continue;
       const dad = getP(S, m.partner);
       if (!dad || dad.dead) continue;
-      if (Math.random() < (dt * 0.55 * housing * food * global * (m.health > 0.6 ? 1 : 0.3)) / YEAR) {
+      const fit = Math.pow(Math.max(0.2, (fitness(m) + fitness(dad)) / 2), 2) * (mut(m, 'fertile') || mut(dad, 'fertile') ? 1.6 : 1);
+      if (Math.random() < (dt * 0.55 * housing * food * global * fit * (m.health > 0.6 ? 1 : 0.3)) / YEAR) {
         const c = makePerson(S, s, m.x, m.z, 0, [m, dad]);
         c.home = m.home;
         const h = getB(S, m.home);
@@ -963,7 +1113,7 @@
 
     // Colonies.
     const alive = S.settlements.filter((o) => o.alive).length;
-    if (s.pop >= 28 + s.era * 3 && alive < MAX_SETTLEMENTS && S.t - s.lastColony > YEAR * 5 && S.t - s.foundedT > YEAR * 5) {
+    if (s.pop >= 28 + Math.min(s.era, 8) * 3 && alive < MAX_SETTLEMENTS && S.t - s.lastColony > YEAR * 5 && S.t - s.foundedT > YEAR * 5) {
       s.lastColony = S.t;
       found(S, s, members);
     }
@@ -1023,7 +1173,7 @@
         if (Math.floor(g0 * 3) !== Math.floor(Wd.grow[i] * 3)) S.fx.tiles.add(i);
       } else if (r === R.BUSH && Wd.amt[i] < 5) {
         const a0 = Wd.amt[i];
-        Wd.amt[i] = Math.min(5, a0 + dt * 0.035 * (S.drought > 0 ? 0.1 : 1));
+        Wd.amt[i] = Math.min(5, a0 + dt * 0.035 * (S.drought > 0 ? 0.1 : 1) * foodMult(S));
         if (a0 < 1 && Wd.amt[i] >= 1) S.fx.tiles.add(i);
       } else if (r === R.ORE) ore++;
       const tr = (Wd.traffic[i] *= decay);
@@ -1116,6 +1266,17 @@
     } else if (r < 0.65) {
       S.drought = YEAR * 1.5;
       log(S, 'A drought grips the land. The berry bushes wither.', { kind: 'disaster' });
+    } else if (r < 0.72 && S.buildings.some((b) => b.sid === s.id && b.type !== 'center')) {
+      // Earthquake: a few buildings come down.
+      const bs = S.buildings.filter((b) => b.sid === s.id && b.type !== 'center' && b.type !== 'field' && b.type !== 'pasture');
+      const n = Math.min(bs.length, U.randi(1, 3));
+      for (let k = 0; k < n; k++) {
+        const b = bs.splice(Math.floor(Math.random() * bs.length), 1)[0];
+        S.fx.events.push({ kind: 'dust', x: b.x + b.w / 2, z: b.z + b.d / 2 });
+        removeBuilding(S, b);
+      }
+      S.stats.quakes++;
+      if (n) log(S, `An earthquake shakes ${s.name}! ${n} building${n > 1 ? 's' : ''} collapse${n > 1 ? '' : 's'}.`, { sid: s.id, x: s.cx, z: s.cz, big: true, kind: 'disaster' });
     } else if (r < 0.85) {
       s.stock.food += 40;
       log(S, `A bountiful season! ${s.name} celebrates a great harvest.`, { sid: s.id, x: s.cx, z: s.cz });
@@ -1132,9 +1293,13 @@
       if (!s.alive) continue;
       const single = S.people.filter((p) => p.sid === s.id && p.age >= 16 && p.age < 50 && (p.partner < 0 || !getP(S, p.partner)));
       const men = single.filter((p) => p.sex === 'M'), women = single.filter((p) => p.sex === 'F');
+      // Everyone looks for the fittest partner they can find (with a bit of luck involved).
+      women.sort((a, b) => fitness(b) - fitness(a));
       for (const f of women) {
-        const m = men.find((m) => !m.taken && Math.abs(m.age - f.age) < 14 && !m.parents.some((x) => f.parents.includes(x)));
-        if (!m) continue;
+        const cands = men.filter((m) => !m.taken && Math.abs(m.age - f.age) < 14 && !m.parents.some((x) => f.parents.includes(x)));
+        if (!cands.length) continue;
+        const m = cands.reduce((a, c) => (fitness(c) * U.rand(0.8, 1.2) > fitness(a) * U.rand(0.8, 1.2) ? c : a));
+        if (fitness(f) < 0.75 && Math.random() < 0.5) continue; // the least fit often stay single
         m.taken = true; m.partner = f.id; f.partner = m.id;
       }
       men.forEach((m) => delete m.taken);
@@ -1151,9 +1316,16 @@
       if (b.launchT < period) continue;
       b.launchT = 0;
       if (has(s, 'starships')) {
-        const crew = S.people.filter((p) => p.sid === s.id && p.age > 20 && p.age < 40).slice(0, 6);
-        if (s.pop > 30 && crew.length) crew.forEach((p) => die(S, p, 'departed for the stars'));
+        const crew = s.pop > 30 ? S.people.filter((p) => p.sid === s.id && p.age > 20 && p.age < 40).slice(0, 6) : [];
+        crew.forEach((p) => { die(S, p, 'departed for the stars'); S.stats.deaths--; });
         S.stats.starships++;
+        if (crew.length) {
+          if (!S.colonies.length || Math.random() < 0.25) {
+            const c = { name: U.placeName() + ' ' + U.pick(['Prime', 'b', 'c', 'd', 'IV', 'Major', 'Minor']), pop: crew.length, founded: yearOf(S), from: s.name, mut: [...new Set(crew.flatMap((p) => p.mut || []))] };
+            S.colonies.push(c);
+            log(S, `Colonists from ${s.name} found a new world among the stars: ${c.name}.`, { sid: s.id, x: b.x + 2, z: b.z + 2, big: true, kind: 'space' });
+          } else U.pick(S.colonies).pop += crew.length;
+        }
         S.fx.events.push({ kind: 'rocket', big: true, x: b.x + 2, z: b.z + 2, bid: b.id, starship: true });
         if (S.stats.starships === 1 || S.stats.starships % 8 === 0) log(S, `A starship lifts off from ${s.name} carrying ${crew.length} colonists to another world.${S.stats.starships > 1 ? ` (${S.stats.starships} have now left.)` : ''}`, { sid: s.id, x: b.x + 2, z: b.z + 2, big: S.stats.starships === 1, kind: 'space' });
       } else {
@@ -1187,15 +1359,180 @@
       tm.diffuse = 0;
     }
     if (tm.event <= 0) { randomEvent(S); tm.event = YEAR * U.rand(3, 7); }
+    if (tm.diffuse === 0) { diplomacy(S); burnBuildings(S, 5); }
+    climate(S, dt);
+    if (!S.people.length) {
+      // Life ended here. Someone always comes back: star-colonists if there are any, otherwise wanderers from across the sea.
+      S.extinctT += dt;
+      if (S.extinctT > 12) {
+        S.extinctT = 0;
+        const c = S.colonies.length ? U.pick(S.colonies) : null;
+        if (c) spawnTribe(S, { ...S.bestKnown }, (t) => `A ship returns from ${c.name}! Its colonists land and found ${t.name}, bringing lost knowledge home.`);
+        else spawnTribe(S, null, (t) => `After a long silence, wanderers from across the sea arrive and found ${t.name} among the ruins.`);
+        S.fx.events.push({ kind: 'landing', x: S.settlements[S.settlements.length - 1].cx, z: S.settlements[S.settlements.length - 1].cz });
+      }
+    }
     if (tm.year >= YEAR) {
       tm.year = 0;
+      yearly(S);
       const n = S.people.length || 1;
       const avg = (k) => S.people.reduce((a, p) => a + p.traits[k], 0) / n;
       S.history.push({
         y: yearOf(S), pop: S.people.length, techs: Math.max(0, ...S.settlements.map((s) => Object.keys(s.known).length)),
         int: +avg('int').toFixed(3), str: +avg('str').toFixed(3), con: +avg('con').toFixed(3), era: S.globalEra,
+        temp: +S.climate.temp.toFixed(2), wars: S.wars.length,
+        mut: Object.fromEntries(Object.keys(MUTATIONS).map((k) => [k, +(S.people.filter((p) => mut(p, k)).length / n).toFixed(3)])),
       });
       if (S.history.length > 600) S.history.shift();
+    }
+  }
+
+  // ---------- setbacks & the long run ----------
+  function climate(S, dt) {
+    const c = S.climate;
+    c.next -= dt;
+    if (c.next <= 0) {
+      const r = Math.random();
+      const prev = c.target;
+      c.target = r < 0.3 ? U.rand(-1, -0.6) : r < 0.5 ? U.rand(0.4, 0.8) : U.rand(-0.15, 0.15);
+      c.next = YEAR * U.rand(30, 80);
+      if (c.target < -0.5 && prev > -0.5) log(S, 'The world grows colder. An ice age is beginning; glaciers creep down the mountains.', { big: true, kind: 'disaster' });
+      else if (c.target > 0.35 && prev < 0.35) log(S, 'A warm age begins. Harvests grow rich and the snows retreat.', { big: true });
+      else if (prev < -0.5 && c.target > -0.5) log(S, 'The ice age is ending. The glaciers are melting.', { big: true });
+    }
+    const d = c.target - c.temp;
+    c.temp += Math.sign(d) * Math.min(Math.abs(d), dt / (YEAR * 12));
+  }
+
+  function diplomacy(S) {
+    const alive = S.settlements.filter((s) => s.alive);
+    for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) {
+      const a = alive[i], b = alive[j];
+      const d = U.dist(a.cx, a.cz, b.cx, b.cz);
+      if (d > 70) continue;
+      let r = ((a.rel[b.id] || 0) + (b.rel[a.id] || 0)) / 2;
+      r *= 0.985;
+      // Crowded neighbours compete for land and food; hunger breeds conflict.
+      if (d < 50 && a.pop > 16 && b.pop > 16) r -= 1.3 * (a.pop + b.pop) / 70;
+      if (a.stock.food < a.pop || b.stock.food < b.pop) r -= 1.5;
+      if (S.climate.temp < -0.5) r -= 0.6;
+      if (a.parent === b.id || b.parent === a.id) r += 0.4;
+      if (Math.min(a.era, b.era) >= 7) r += 0.3; // diplomacy of advanced ages
+      r = U.clamp(r, -100, 100);
+      a.rel[b.id] = r; b.rel[a.id] = r;
+      const war = S.wars.find((w) => (w.a === a.id && w.b === b.id) || (w.a === b.id && w.b === a.id));
+      if (!war && r < -55 && Math.random() < 0.15 && Math.min(a.era, b.era) >= 1 && !S.wars.some((w) => w.a === a.id || w.b === a.id || w.a === b.id || w.b === b.id)) {
+        S.wars.push({ a: a.id, b: b.id, t0: S.t, dur: YEAR * U.rand(3, 8), dead: [0, 0], pop0: [a.pop, b.pop] });
+        S.stats.wars++;
+        const why = S.climate.temp < -0.5 ? 'as the ice age bites' : a.stock.food < a.pop || b.stock.food < b.pop ? 'over dwindling food' : 'over land and pride';
+        log(S, `War! ${a.name} and ${b.name} take up arms against each other ${why}.`, { x: (a.cx + b.cx) / 2, z: (a.cz + b.cz) / 2, big: true, kind: 'war' });
+      }
+    }
+    // Ending wars.
+    for (const w of S.wars.slice()) {
+      const a = getS(S, w.a), b = getS(S, w.b);
+      const lossA = a ? 1 - a.pop / Math.max(1, w.pop0[0]) : 1, lossB = b ? 1 - b.pop / Math.max(1, w.pop0[1]) : 1;
+      const over = S.t - w.t0 > w.dur || lossA > 0.4 || lossB > 0.4;
+      if (!over || !a || !b) { if (!a || !b) S.wars.splice(S.wars.indexOf(w), 1); continue; }
+      S.wars.splice(S.wars.indexOf(w), 1);
+      a.rel[b.id] = b.rel[a.id] = 25;
+      const [win, lose] = lossA > lossB ? [b, a] : [a, b];
+      const loot = {};
+      for (const k of ['food', 'wood', 'stone', 'metal']) { loot[k] = Math.floor(lose.stock[k] * 0.4); lose.stock[k] -= loot[k]; win.stock[k] += loot[k]; }
+      const dead = w.dead[0] + w.dead[1];
+      if (lose.pop <= 4) {
+        // Conquered: the survivors are absorbed.
+        S.people.filter((p) => p.sid === lose.id).forEach((p) => { endTask(S, p); const h = getB(S, p.home); if (h) h.residents = h.residents.filter((id) => id !== p.id); p.home = -1; p.sid = win.id; p.task = { kind: 'migrate', stage: 0, timer: 0 }; goTo(p, win.cx, win.cz); });
+        log(S, `${win.name} conquers ${lose.name}. ${dead} fell in the war.`, { sid: win.id, x: lose.cx, z: lose.cz, big: true, kind: 'war' });
+      } else log(S, `Peace between ${a.name} and ${b.name}. ${win.name} claims victory; ${dead} lives were lost.`, { sid: win.id, x: (a.cx + b.cx) / 2, z: (a.cz + b.cz) / 2, big: true, kind: 'war' });
+    }
+  }
+
+  function burnBuildings(S, dt) {
+    for (const b of S.buildings.slice()) {
+      if (!b.fire) continue;
+      b.fire -= dt;
+      if (b.fire <= 0) {
+        S.fx.events.push({ kind: 'dust', x: b.x + b.w / 2, z: b.z + b.d / 2 });
+        const s = getS(S, b.sid);
+        if (s && Math.random() < 0.4) log(S, `A ${b.type === 'research' ? TD.researchName(b.style).toLowerCase() : BUILDINGS[b.type].name.toLowerCase()} in ${s.name} burns to the ground.`, { sid: s.id, x: b.x + 1, z: b.z + 1, kind: 'war' });
+        removeBuilding(S, b);
+      }
+    }
+  }
+
+  function yearly(S) {
+    S.globalEra = Math.max(0, ...S.settlements.filter((s) => s.alive).map((s) => s.era));
+    for (const s of S.settlements) {
+      if (!s.alive) continue;
+      s.popLog.push(s.pop);
+      if (s.popLog.length > 6) s.popLog.shift();
+      // Catastrophic loss of people can plunge a town into a dark age.
+      const peak = Math.max(...s.popLog);
+      if (peak >= 12 && s.pop < peak * 0.55 && S.t - s.lastDark > YEAR * 25 && Math.random() < 0.45 && s.order.length > 4) {
+        s.lastDark = S.t;
+        const lost = forget(S, s, U.randi(1, 3));
+        if (lost.length) {
+          S.stats.darkAges++;
+          log(S, `${s.name} falls into a dark age. The secrets of ${lost.join(', ')} are forgotten.`, { sid: s.id, x: s.cx, z: s.cz, big: true, kind: 'disaster' });
+        }
+      }
+    }
+    // Families leave overcrowded towns for smaller neighbours.
+    const aliveS = S.settlements.filter((s) => s.alive);
+    for (const s of aliveS) {
+      if (s.pop < 60) continue;
+      const dest = aliveS.filter((o) => o !== s && o.pop < s.pop / 2.5 && !atWar(S, s, o) && U.dist(o.cx, o.cz, s.cx, s.cz) < 80).sort((a, b) => a.pop - b.pop)[0];
+      if (!dest || Math.random() > 0.5) continue;
+      const fam = S.people.filter((p) => p.sid === s.id && p.sex === 'F' && p.partner >= 0 && p.age > 18 && p.age < 45).slice(0, 2);
+      const movers = [];
+      fam.forEach((f) => { movers.push(f, getP(S, f.partner)); S.people.forEach((c) => { if (c.sid === s.id && c.age < 13 && c.parents.includes(f.id)) movers.push(c); }); });
+      for (const p of movers) {
+        if (!p) continue;
+        endTask(S, p);
+        const h = getB(S, p.home);
+        if (h) h.residents = h.residents.filter((id) => id !== p.id);
+        p.home = -1; p.sid = dest.id; p.carry = null; p.armed = false;
+        p.task = { kind: 'migrate', stage: 0, timer: 0 };
+        goTo(p, dest.cx + U.rand(-2, 2), dest.cz + U.rand(-2, 2));
+        p.thought = `Moving to ${dest.name} for a better life`;
+      }
+      if (movers.length && Math.random() < 0.2) log(S, `Crowded ${s.name} sees families leave for ${dest.name}.`, { sid: dest.id, x: dest.cx, z: dest.cz });
+    }
+
+    // Colonies among the stars grow, and sometimes call home.
+    for (const c of S.colonies) c.pop = Math.round(c.pop * 1.03 + 1);
+    if (S.colonies.length && Math.random() < 0.06) {
+      const c = U.pick(S.colonies);
+      const alive = S.settlements.filter((s) => s.alive);
+      const r = Math.random();
+      if (r < 0.45 && alive.length) {
+        alive.forEach((s) => { if (s.research) s.research.rp += TD.tech(s.research.id).cost * 0.3; });
+        log(S, `A transmission arrives from ${c.name} (population ${c.pop}). Their discoveries speed up research everywhere.`, { kind: 'space' });
+      } else if (r < 0.85 && alive.length) {
+        const s = U.pick(alive);
+        const n = U.randi(3, 6);
+        for (let k = 0; k < n; k++) {
+          const p = makePerson(S, s, s.cx + U.rand(-2, 2), s.cz + U.rand(-2, 2), U.rand(18, 30), null);
+          for (const t of ['str', 'int', 'con']) p.traits[t] = Math.min(3, p.traits[t] + 0.15);
+          p.mut = c.mut.filter(() => Math.random() < 0.5);
+          if (Math.random() < 0.3) p.mut.push(U.pick(Object.keys(MUTATIONS).filter((k) => MUTATIONS[k].good)));
+          p.thought = `Just arrived from ${c.name}`;
+        }
+        c.pop = Math.max(1, c.pop - n);
+        S.fx.events.push({ kind: 'landing', x: s.cx, z: s.cz });
+        log(S, `A ship from ${c.name} lands at ${s.name}. ${n} star-born settlers step out.`, { sid: s.id, x: s.cx, z: s.cz, big: true, kind: 'space' });
+      } else if (S.colonies.length > 1 || Math.random() < 0.3) {
+        S.colonies.splice(S.colonies.indexOf(c), 1);
+        log(S, `All contact with ${c.name} has been lost.`, { kind: 'disaster' });
+      }
+    }
+    // Forget long-dead towns once their ruins are gone.
+    for (const s of S.settlements.slice()) {
+      if (s.alive || S.buildings.some((b) => b.sid === s.id)) continue;
+      S.settlements.splice(S.settlements.indexOf(s), 1);
+      S.cache.s.delete(s.id);
+      S.usedColors = S.usedColors.filter((c) => c !== s.color);
     }
   }
 
@@ -1209,11 +1546,18 @@
     o.world = W.fromJSON(o.world);
     o.people.forEach((p) => { p.task = null; p.moving = false; p.working = false; p.asleep = false; p.carry = null; p.mode = 'walk'; });
     o.buildings.forEach((b) => { if (!b.residents) b.residents = []; });
+    // Older saves: fill in newer fields.
+    o.climate = o.climate || { temp: 0, target: 0, next: YEAR * 40 };
+    o.wars = o.wars || []; o.colonies = o.colonies || []; o.extinctT = 0;
+    Object.assign(o.stats, { wars: 0, darkAges: 0, quakes: 0, ...o.stats });
+    o.settlements.forEach((s) => { s.order = s.order || Object.keys(s.known); s.rel = s.rel || {}; s.popLog = s.popLog || []; s.lastDark = s.lastDark ?? -1e9; s.fut = TD.futureCount(s.known); });
+    if (!o.bestKnown) { o.bestKnown = {}; o.settlements.forEach((s) => Object.assign(o.bestKnown, s.known)); }
+    o.people.forEach((p) => { p.mut = p.mut || []; p.armed = false; });
     attach(o);
     return o;
   }
 
   G.SIM = {
-    DAY, YEAR, create, step, serialize, deserialize, yearOf, tod, isNight, has, getP, getB, getS, capacity, lifeBonus, TASKS,
+    DAY, YEAR, create, step, serialize, deserialize, yearOf, tod, isNight, has, getP, getB, getS, capacity, lifeBonus, TASKS, MUTATIONS, mut, fitness,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

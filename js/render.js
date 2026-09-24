@@ -158,6 +158,7 @@
       this.emitters = new Map();
       this.particles = []; this.launches = []; this.bursts = []; this.rs.clear();
       this.elec = this.anyHas('electricity');
+      this.temp = S.climate ? S.climate.temp : 0;
       for (let i = 0; i < N * N; i++) { this.terrain.alloc(); this.terrain.alloc(); }
       for (let i = 0; i < N * N; i++) { this.drawTile(i); this.drawProps(i); }
       for (const b of S.buildings) this.drawBuilding(b);
@@ -177,9 +178,13 @@
       return Wd.h[i] * HS;
     }
 
+    // Snow line and vegetation tint follow the climate.
+    snowLine() { return 25 - Math.max(0, -this.temp) * 13; }
+
     tileTop(i) {
       const S = this.S, Wd = S.world;
       const t = Wd.type[i], h = Wd.h[i], v = 1 + (U.hash(i * 3 + 11) - 0.5) * 0.09;
+      const cold = Math.max(0, -this.temp), warm = Math.max(0, this.temp);
       let c;
       const o = Wd.occ[i];
       const b = o >= 0 ? S.cache.b.get(o) : null;
@@ -189,9 +194,10 @@
       else if (Wd.road[i]) c = [0, 0xa8875c, 0xa9a59b, 0x44474c][Wd.road[i]];
       else if (t === T.WATER) c = mix(0x6a7a5a, 0xd8c890, h / W.SEA);
       else if (t === T.SAND) c = 0xe3d49a;
-      else if (t === T.GRASS) c = mix(0x5fae45, 0x93b55a, U.clamp((h - 10) / 9, 0, 1));
+      else if (t === T.GRASS) c = mix(mix(0x5fae45, 0x93b55a, U.clamp((h - 10) / 9, 0, 1)), cold ? 0xc6d2c2 : 0x49a83a, cold ? cold * 0.55 : warm * 0.35);
       else if (t === T.ROCK) c = mix(0x8a8a86, 0x9d9a94, U.hash(i));
       else c = 0xf4f7fa;
+      if (!b && !Wd.road[i] && t !== T.WATER && h >= this.snowLine() + (U.hash(i * 5) - 0.5) * 1.5) c = 0xf2f6fa;
       if (Wd.fire[i] > 0) c = 0x3a3a30;
       return shade(c, v);
     }
@@ -223,7 +229,8 @@
       if (r === R.TREE) {
         const g = Math.min(1, Wd.grow[i]);
         const k = 0.3 + 0.7 * (Math.floor(g * 3) / 3 || 0.1) * (0.85 + hs * 0.3);
-        const leaf = burnt ? 0x3a2a20 : Wd.h[i] >= 15 || hs < 0.3 ? shade(0x2f6b3a, 0.9 + hs * 0.2) : shade(0x3f8f3a, 0.85 + hs * 0.3);
+        let leaf = burnt ? 0x3a2a20 : Wd.h[i] >= 15 || hs < 0.3 ? shade(0x2f6b3a, 0.9 + hs * 0.2) : shade(0x3f8f3a, 0.85 + hs * 0.3);
+        if (!burnt && Wd.h[i] >= this.snowLine() - 4) leaf = mix(leaf, 0xf2f6fa, 0.65);
         if (Wd.h[i] >= 15 || hs < 0.3) {
           add(this.props, X, Y, Z, 0.14, 0.35 * k, 0.14, 0x5a3a20);
           add(this.props, X, Y + 0.3 * k, Z, 0.85 * k, 0.4 * k, 0.85 * k, leaf);
@@ -306,9 +313,9 @@
       const fx = S.fx;
       const elec = this.anyHas('electricity');
       if (elec !== this.elec) { this.elec = elec; for (let i = 0; i < N * N; i++) if (S.world.road[i] >= 2) fx.tiles.add(i); }
+      if (Math.abs(S.climate.temp - this.temp) > 0.06) { this.temp = S.climate.temp; for (let i = 0; i < N * N; i++) fx.tiles.add(i); }
       let n = 0;
-      for (const i of fx.tiles) { this.drawTile(i); this.drawProps(i); if (++n > 4000) break; }
-      fx.tiles.clear();
+      for (const i of fx.tiles) { this.drawTile(i); this.drawProps(i); fx.tiles.delete(i); if (++n > 3000) break; }
       for (const id of fx.removed) { const old = this.bSlots.get(id); if (old) for (const [pool, k] of old) pool.release(k); this.bSlots.delete(id); this.emitters.delete(id); }
       fx.removed.length = 0;
       for (const id of fx.bld) {
@@ -370,15 +377,15 @@
         rs.y += (gy - rs.y) * Math.min(1, dt * 10);
         if (p.moving) rs.ph += dt * 11;
         const X = p.x - OFF, Z = p.z - OFF, Y = rs.y;
-        const sc = p.age < 14 ? 0.55 + (p.age / 14) * 0.45 : 1;
+        const sc = (p.age < 14 ? 0.55 + (p.age / 14) * 0.45 : 1) * (p.mut && p.mut.includes('giant') ? 1.3 : 1);
         const f = p.facing;
         const fx = Math.sin(f), fz = Math.cos(f), px = Math.cos(f), pz = -Math.sin(f);
         const shirt = s ? shade(s.color, 0.85 + U.hash(p.id) * 0.3) : 0x888888;
         const skin = SKIN[p.id % SKIN.length];
-        const hair = p.age > 58 ? 0xd8d8d8 : HAIR[(p.id * 7) % HAIR.length];
+        const hair = p.armed && era >= 2 ? 0x8a8e94 : p.age > 58 ? 0xd8d8d8 : HAIR[(p.id * 7) % HAIR.length];
+        const era = s ? s.era : 0;
         const legsC = s && s.era >= 5 ? 0x34495e : 0x5a4632;
         const headC = p.sick > 0 ? mix(skin, 0x80c060, 0.6) : skin;
-        const era = s ? s.era : 0;
         const mark = (k) => { if (k >= 0) this.pick[k] = p.id; };
 
         if (p.mode === 'car') {
@@ -422,6 +429,15 @@
         mark(this.dyn.push(X, ty, Z, wdt, torH, 0.09 * sc, shirt, f));
         mark(this.dyn.push(X, ty + torH / 2 + head / 2, Z, head, head, head, headC, f));
         this.dyn.push(X - fx * 0.01, ty + torH / 2 + head + 0.012 * sc, Z - fz * 0.01, head * 1.05, 0.03 * sc, head * 1.05, hair, f);
+        if (p.armed) {
+          if (era < 5) {
+            this.dyn.push(X + px * 0.1 * sc, ty + 0.05, Z + pz * 0.1 * sc, 0.025, 0.5 * sc, 0.025, era >= 2 ? 0xb8b8c0 : 0x8b5a2b, f);
+            this.dyn.push(X - px * 0.09 * sc + fx * 0.02, ty, Z - pz * 0.09 * sc + fz * 0.02, 0.03, 0.16 * sc, 0.13 * sc, s ? s.color : 0x888888, f);
+          } else {
+            this.dyn.push(X + px * 0.08 * sc + fx * 0.1, ty + 0.02, Z + pz * 0.08 * sc + fz * 0.1, 0.03, 0.03, 0.26 * sc, era >= 8 ? 0xe0f0ff : 0x2a2a2a, f);
+            if (era >= 8) this.dynGlow.push(X + px * 0.08 * sc + fx * 0.24, ty + 0.02, Z + pz * 0.08 * sc + fz * 0.24, 0.035, 0.035, 0.035, s ? s.color : 0x9ff3ff, f);
+          }
+        }
         if (p.carry && p.carry.type !== 'goods') {
           if (era >= 2) {
             // Hand cart trailing behind.
@@ -519,14 +535,19 @@
       for (const l of this.launches) {
         l.t += dt;
         const lift = Math.max(0, l.t - 2.5);
-        const h = 0.35 * lift * lift;
+        let h = 0.35 * lift * lift;
+        if (l.landing) {
+          const k = Math.max(0, 1 - l.t / 8);
+          h = 70 * k * k;
+          if (l.t > 14) continue;
+        }
         const k = l.starship ? 1.8 : 1;
         this.drawRocket(l.x, l.y + h, l.z, k, l.starship);
         const flame = l.starship ? 0x8ff0ff : 0xffa030;
         const fl = 0.8 + Math.random() * 0.4;
         this.dynGlow.push(l.x, l.y + h - 0.3 * k * fl, l.z, 0.3 * k, 0.6 * k * fl, 0.3 * k, flame);
         this.dynGlow.push(l.x, l.y + h - 0.7 * k * fl, l.z, 0.18 * k, 0.5 * k * fl, 0.18 * k, 0xfff0a0);
-        const n = l.t < 6 ? 5 : 1;
+        const n = l.landing ? (h > 0.2 && h < 12 ? 3 : 0) : l.t < 6 ? 5 : 1;
         for (let j = 0; j < n && this.particles.length < this.pcap + 200; j++) {
           this.particles.push({ x: l.x + U.rand(-0.4, 0.4), y: l.y + h, z: l.z + U.rand(-0.4, 0.4), vy: U.rand(-0.2, 0.3), vx: U.rand(-0.8, 0.8), vz: U.rand(-0.8, 0.8), age: 0, life: U.rand(2, 5), s: U.rand(0.3, 0.6), dark: false });
         }
@@ -536,6 +557,16 @@
 
     drawFires(S) {
       const t = this.time;
+      for (const b of S.buildings) {
+        if (!b.fire) continue;
+        const y0 = b.baseY * HS;
+        for (let k = 0; k < 6; k++) {
+          const fl = 0.6 + Math.sin(t * 12 + k * 1.7 + b.id) * 0.4;
+          const x = b.x - OFF + 0.3 + U.hash(b.id * 9 + k) * (b.w - 0.6), z = b.z - OFF + 0.3 + U.hash(b.id * 5 + k * 3) * (b.d - 0.6);
+          this.dynGlow.push(x, y0 + 0.4 + fl * 0.4 + (k % 3) * 0.3, z, 0.3, 0.8 * fl + 0.2, 0.3, k % 2 ? 0xffd040 : 0xff5010);
+        }
+        if (Math.random() < 0.4 && this.particles.length < this.pcap) this.particles.push({ x: b.x - OFF + b.w / 2, y: y0 + 1.5, z: b.z - OFF + b.d / 2, vy: 1.3, age: 0, life: 4, s: 0.35, dark: true });
+      }
       for (const i of S.burning) {
         const X = (i % N) - OFF + 0.5, Z = Math.floor(i / N) - OFF + 0.5, Y = S.world.h[i] * HS;
         for (let k = 0; k < 3; k++) {
@@ -556,7 +587,7 @@
         p.y += p.vy * dt; p.x += (0.25 + (p.vx || 0)) * dt; p.z += (p.vz || 0) * dt;
         const f = p.age / p.life;
         const s = p.s * (1 + f * 2.2) * (1 - f * f * 0.6);
-        const c = p.dark ? mix(0x3a3a3a, 0x8a8a8a, f) : mix(0xe8e8e8, 0xffffff, f);
+        const c = p.col != null ? mix(p.col, 0xe8e0d0, f) : p.dark ? mix(0x3a3a3a, 0x8a8a8a, f) : mix(0xe8e8e8, 0xffffff, f);
         this.dyn.push(p.x, p.y, p.z, s, s, s, c);
         ps[w++] = p;
       }
@@ -574,6 +605,14 @@
     // Events coming from the sim (discoveries, rockets...)
     onEvent(e) {
       if (e.kind === 'rocket') this.launch(e);
+      if (e.kind === 'dust') {
+        const X = e.x - OFF, Z = e.z - OFF, Y = this.groundY(e.x, e.z);
+        for (let k = 0; k < (this.mobile ? 14 : 30); k++) this.particles.push({ x: X + U.rand(-1, 1), y: Y + U.rand(0, 1.5), z: Z + U.rand(-1, 1), vy: U.rand(0.3, 1.2), vx: U.rand(-0.8, 0.8), vz: U.rand(-0.8, 0.8), age: 0, life: U.rand(2, 3.5), s: U.rand(0.3, 0.6), col: 0xa89878 });
+      }
+      if (e.kind === 'landing') {
+        const x = e.x + 3, z = e.z + 3;
+        this.launches.push({ landing: true, bid: -1, x: x - OFF, y: this.groundY(x, z), z: z - OFF, t: 0, starship: true });
+      }
       if ((e.kind === 'tech' || e.kind === 'era' || e.kind === 'colony') && e.x != null) {
         const s = e.sid != null ? this.S.cache.s.get(e.sid) : null;
         this.bursts.push({ x: e.x - OFF, y: this.groundY(e.x, e.z) + 1.5, z: e.z - OFF, t: 0, c: e.kind === 'era' ? 0xffe060 : s ? s.color : 0xffffff });

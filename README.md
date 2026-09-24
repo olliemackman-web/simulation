@@ -22,14 +22,21 @@ The world autosaves to your browser every 30 seconds, so closing the tab doesn't
 
 ## What's going on
 
-- **People** get hungry, eat, sleep at night, pair up, have children, get sick, grow old and die. Each person has inherited traits (strength, intellect, constitution, curiosity) that mutate a little every generation, so the population slowly evolves. Skills improve with practice, and children pick up some of their parents' know-how.
-- **Work** is decided by each town's needs: gathering food (berries, hunting, fishing, farms, pastures), chopping wood, quarrying stone, mining ore, building, research and trade.
-- **Technology**: 38 techs across 8 eras (Stone, Tribal, Bronze, Iron, Medieval, Industrial, Modern, Space). Research comes from thinkers, learning by doing and "eureka" moments. Ideas also spread between neighbouring towns and along trade routes.
-- **Building**: towns plan and construct houses, farms, granaries, libraries, markets, temples, windmills, factories, power plants, hospitals, fusion reactors and launch pads. Old buildings get rebuilt in the style of each new era.
-- **Roads** aren't planned. Footpaths wear in wherever people walk a lot, and later get paved with stone and then asphalt.
-- **Colonies**: when a town grows big enough, some families leave to found a new settlement.
-- **Events**: wildfires, plagues, droughts, bountiful harvests and wandering strangers.
-- **Endgame**: rocket launches, then starships carrying colonists off-world.
+It never ends. There's no final tech and no finished state. Progress keeps going, slows down as it gets harder, and gets knocked back by disasters.
+
+- **People** get hungry, eat, sleep at night, pair up, have children, get sick, grow old and die.
+- **Evolution**: every person inherits strength, intellect, constitution and curiosity from their parents, with small random changes. Fitter people are more likely to find partners and have more children, and frail babies are less likely to survive. Now and then a newborn gets a brand-new **mutation**: long-lived, genius, mighty, plague-resistant, fertile, cold-hardy, swift, giant (they're visibly bigger), frail or slow-witted. Helpful mutations spread through the population over generations and harmful ones die out. Ice ages favour the cold-hardy.
+- **Work** is decided by each town's needs: gathering food, chopping wood, quarrying stone, mining ore, building, research, trade and, in wartime, fighting.
+- **Technology never runs out.** First there are 36 technologies across 8 eras, from the Stone Age to the Space Age. After Starships it keeps going with an endless chain of future discoveries (Nanotechnology, Space Elevators, Dyson Swarms, Wormhole Theory…). Each one is harder than the last, and every five open a new age (Stellar, Galactic, Transcendent, Cosmic, Eternal, then Stellar II…).
+- **Architecture evolves** from huts to log cabins, stone villas, timber frames, brick terraces, apartment blocks, glass towers, then tiered arcologies with sky gardens, floating crowns and halo rings. Town centres become space elevators that climb out of sight.
+- **Setbacks**:
+  - **Climate** swings between ice ages (snow creeps down the mountains, harvests shrink, people get hungrier) and warm ages.
+  - **Wars** break out between crowded or hungry neighbours. Soldiers march, raid food and burn buildings. Wars end in peace or conquest.
+  - **Dark ages** follow catastrophic population loss. Towns can forget technologies and have to rediscover them.
+  - Wildfires, plagues, droughts and earthquakes.
+- **Ruins and resettlement**: abandoned towns crumble over the years, and new settlers eventually build on the land.
+- **Beyond the island**: starships found colonies on other worlds. Those colonies grow, send back discoveries, and sometimes send ships home with star-born settlers who carry new mutations. If life on the island ever dies out completely, a ship returns from the stars to restart civilisation with its lost knowledge. With no colonies, wanderers arrive from across the sea instead.
+- **Roads** aren't planned. Footpaths wear in wherever people walk, and later get paved.
 
 ## Controls (all optional)
 
@@ -43,7 +50,7 @@ The world autosaves to your browser every 30 seconds, so closing the tab doesn't
 | `C` | Toggle the auto camera |
 | New world | Start over with a freshly generated island |
 
-At the default 2× speed a year passes every 30 seconds. The Space Age usually arrives after about 35–45 minutes.
+At the default 2× speed a year passes every 30 seconds. The Space Age usually arrives after 35–45 minutes. After that, new ages keep arriving more and more slowly.
 
 ## Code
 

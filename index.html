@@ -76,6 +76,13 @@
   #chronicle li .y { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 52px; font-size: 11px; padding-top: 1px; }
   #chronicle li.big { color: var(--accent); }
   #chronicle li.disaster { color: var(--bad); }
+  #chronicle li.evo { color: #7ab8ff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(111,220,140,0.15); color: var(--good); white-space: nowrap; }
+  .chip.bad { background: rgba(255,122,106,0.15); color: var(--bad); }
+  .world { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11px; color: var(--muted); }
+  .world b { color: var(--text); font-weight: 500; text-align: right; }
+  #right { max-height: calc(100vh - 90px); overflow-y: auto; }
   @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
 
   #toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); padding: 12px 20px; font: 700 15px Silkscreen, monospace; text-align: center; color: var(--accent); opacity: 0; transition: opacity 0.6s; pointer-events: none; max-width: min(640px, 90vw); text-shadow: 2px 2px 0 #000; }
@@ -139,6 +146,8 @@
     <span class="stat">Population <b id="s-pop">0</b></span>
     <span class="stat opt">Towns <b id="s-towns">0</b></span>
     <span class="stat opt" id="s-time">☀</span>
+    <span class="stat" id="s-climate"></span>
+    <span class="stat" id="s-war" style="color:var(--bad)"></span>
   </div>
   <div id="controls" class="panel">
     <button data-speed="0" title="Pause (Space)">❚❚</button>
@@ -161,6 +170,7 @@
     <canvas id="chart" width="480" height="180"></canvas>
     <div class="legend"><span style="--c:#6fdc8c">Population</span><span style="--c:#ffd35a">Technologies</span><span style="--c:#7ab8ff">Intelligence</span></div>
     <div class="traits" id="traits"></div>
+    <div id="extra"></div>
   </div>
 </div>
 <div id="sheetbar"><button data-tab="towns">Civilisations</button><button data-tab="stats">Evolution</button><button class="close" title="Close">✕</button></div>

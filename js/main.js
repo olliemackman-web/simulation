@@ -96,10 +96,6 @@
       app.R.update(S, dt);
       app.ui.frame(S, dt);
 
-      if (!S.people.length) {
-        app.extinctT += dt;
-        if (app.extinctT > 8) { app.ui.toast('Life on this world has ended. A new world begins…'); app.newWorld(); }
-      }
       saveT += dt;
       if (saveT > 30) { saveT = 0; save(S); }
       requestAnimationFrame(frame);
